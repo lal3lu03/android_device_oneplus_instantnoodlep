@@ -9,13 +9,21 @@ $(call inherit-product, $(SRC_TARGET_DIR)/product/core_64_bit.mk)
 TARGET_SUPPORTS_OMX_SERVICE := false
 $(call inherit-product, $(SRC_TARGET_DIR)/product/full_base_telephony.mk)
 
+# PixelOS versioning expects CUSTOM_BUILD to be non-empty.
+ifeq ($(strip $(CUSTOM_BUILD)),)
+CUSTOM_BUILD := instantnoodlep
+endif
+
 # Inherit from instantnoodlep device
 $(call inherit-product, device/oneplus/instantnoodlep/device.mk)
 
-# Inherit some common Lineage stuff.
-$(call inherit-product, vendor/lineage/config/common_full_phone.mk)
+# Inherit some common PixelOS stuff.
+$(call inherit-product, vendor/custom/config/common_full_phone.mk)
 
-PRODUCT_NAME := lineage_instantnoodlep
+# NFC - Remove platform NFC packages (APEX-only, use com.android.nfcservices instead)
+PRODUCT_PACKAGES := $(filter-out NfcNci framework-nfc framework-nfc.impl,$(PRODUCT_PACKAGES))
+
+PRODUCT_NAME := aosp_instantnoodlep
 PRODUCT_DEVICE := instantnoodlep
 PRODUCT_MANUFACTURER := OnePlus
 PRODUCT_BRAND := OnePlus
