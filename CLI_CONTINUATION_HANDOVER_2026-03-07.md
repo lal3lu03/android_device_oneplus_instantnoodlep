@@ -3,8 +3,11 @@
 ## 1) Current repository context
 - Repo path: `/home/lal3lu/android/pixelos/device/oneplus/instantnoodlep`
 - Branch: `a16-bringup-fixes`
-- HEAD: `52adc43`
-- Worktree: dirty (expected during bring-up; do not reset)
+- HEAD: `a6b32a7`
+- Checkpoint commit:
+  - `a6b32a7 instantnoodlep: checkpoint A16 bringup fixes and handover`
+- Worktree after checkpoint:
+  - only untracked local artifacts remained: `build.log`, `out/`
 
 ## 2) What was already validated as working
 - Black screen after unlock: fixed.

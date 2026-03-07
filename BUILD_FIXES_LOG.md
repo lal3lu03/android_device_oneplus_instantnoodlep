@@ -1,8 +1,8 @@
 # PixelOS Android 16 QPR1 Build Fixes for OnePlus 8 Pro (instantnoodlep)
 
-**Last Updated:** February 21, 2026 17:21
+**Last Updated:** March 7, 2026 18:15
 
-**Build Target:** aosp_instantnoodlep-ap2a-userdebug  
+**Build Target:** aosp_instantnoodlep-bp3a-userdebug  
 **ROM:** PixelOS sixteen-qpr1 (BUILD_ID: BP3A.250905.014)  
 **Device Trees:** LineageOS 23.2 (device), LineageOS 23.0 (vendor blobs)
 
@@ -10,11 +10,11 @@
 
 ## Build Status
 
-✅ **128 Issues Resolved** (48 Compilation + 80 Runtime/Policy/Kernel)  
-📊 **337+ Files Modified** (118 kernel UAPI headers, complete networking stack + RmNet data headers)  
-🔧 **Build #21 Restarting** - Issue #128 (linux/rmnet_data.h) fixed at 56%  
-⏱️ **Build Attempts:** 21 total  
-⚠️ **Critical:** Build requires flag
+✅ **180 Issues Logged** (compilation + runtime + policy bring-up)  
+📊 **Checkpoint Commit:** `a6b32a7` (`29 files changed, 1388 insertions(+), 3 deletions(-)`)  
+🔧 **Latest built images:** `vendor.img` + `odm.img` at `2026-03-06 18:07`  
+⏱️ **Next queued step:** rebuild `vendorimage` and flash `vendor_b` (Issue 178 validation)  
+⚠️ **Open runtime bring-up:** speaker audio output and shake/gesture behavior
 
 ---
 
@@ -4423,3 +4423,65 @@ Temporary bringup flags disabled Touch/LiveDisplay features to avoid boot-time s
 - Outputs:
   - `out/target/product/instantnoodlep/vendor.img` (`2026-03-06 18:07`, 523M)
   - `out/target/product/instantnoodlep/odm.img` (`2026-03-06 18:07`, 84M)
+
+---
+
+### 178. Sensor HAL Persist Access Fix (Pending Build/Flash Validation)
+**Date:** March 6, 2026
+
+**Observed runtime issue:**
+- Startup log showed repeated AVC denials for `vendor_hal_oplus_sensor_default`:
+  - denied `{ search }` on `vendor_persist_engineer_file`
+  - denied `{ search }` on `vendor_persist_sensors_file`
+- Same startup sequence repeatedly attempted to start:
+  - `aidl/android.hardware.sensors.ISensors/default`
+
+**Log source:**
+- `/tmp/reboot_startup_20260306_184026.log`
+
+**Fix added (device-side sepolicy overlay):**
+- `device/oneplus/instantnoodlep/sepolicy/vendor/vendor_hal_oplus_sensor_default.te` (new)
+  - `r_dir_file(vendor_hal_oplus_sensor_default, vendor_persist_engineer_file)`
+  - `r_dir_file(vendor_hal_oplus_sensor_default, vendor_persist_sensors_file)`
+
+**Status at time of fix:**
+- Policy file added in tree.
+- Rebuild/flash validation was queued next (`vendorimage` + flash `vendor_b`).
+
+---
+
+### 179. CLI Continuation Handover Document Added
+**Date:** March 7, 2026
+
+**File added:**
+- `device/oneplus/instantnoodlep/CLI_CONTINUATION_HANDOVER_2026-03-07.md`
+
+**Purpose:**
+- Provide exact continuation state for CLI debugging and flashing:
+  - current branch/context
+  - subsystem file map
+  - key logs and artifacts
+  - slot-`b` command sequence for rebuild/flash/re-capture
+  - focused audio and sensor validation command blocks
+
+---
+
+### 180. Checkpoint Commit Created Before Further Flash/Debug Cycles
+**Date:** March 7, 2026
+
+**Commit:**
+- `a6b32a7`
+- Message: `instantnoodlep: checkpoint A16 bringup fixes and handover`
+
+**Commit stats:**
+- `29 files changed, 1388 insertions(+), 3 deletions(-)`
+- Included:
+  - init overrides (`zz_*`), bring-up rc, touch IDC
+  - sepolicy vendor overlay restore set + sensor HAL persist fix
+  - framework/systemui overlays, build wiring updates
+  - handover documentation and updated fix log
+
+**Post-commit working tree note:**
+- Remaining untracked local artifacts:
+  - `build.log`
+  - `out/` (local directory under this repo path)
