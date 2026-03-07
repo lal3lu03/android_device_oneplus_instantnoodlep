@@ -14,7 +14,7 @@
 📊 **337+ Files Modified** (118 kernel UAPI headers, complete networking stack + RmNet data headers)  
 🔧 **Build #21 Restarting** - Issue #128 (linux/rmnet_data.h) fixed at 56%  
 ⏱️ **Build Attempts:** 21 total  
-⚠️ **Critical:** Build requires `WITH_DEXPREOPT=false` flag
+⚠️ **Critical:** Build requires flag
 
 ---
 
@@ -3382,3 +3382,1044 @@ AB_OTA_PARTITIONS := $(filter-out recovery,$(AB_OTA_PARTITIONS))
 ✅ SELinux compile + neverallow checks fixed  
 ✅ Recovery partition mismatch fixed for A/B no-recovery setup  
 ✅ **ZIP creation succeeded**
+
+---
+
+## Session 14: A16 First-Boot Runtime Debugging (2026-03-04)
+
+### Issue #135: Touchscreen had no device-specific IDC on A16
+
+**Symptom:**
+- Early A16 boot behavior showed partial touch functionality and unreliable interaction during first-boot/launcher testing.
+- Input investigation showed the device as `touchpanel`, but there was no explicit device IDC in the device tree.
+
+**Root Cause Analysis:**
+- A16 input handling was more sensitive to correct device metadata/classification.
+- Without a device-specific IDC, InputReader behavior depended entirely on generic defaults.
+
+**Fix:**
+- Added a dedicated IDC file:
+  - `device/oneplus/instantnoodlep/input/touchpanel.idc`
+- Installed it from:
+  - `device/oneplus/instantnoodlep/device.mk`
+
+**Result:**
+- `dumpsys input` shows:
+  - `ConfigurationFile: /vendor/usr/idc/touchpanel.idc`
+- Touch now works in the running system (lockscreen, launcher, notification shade).
+
+---
+
+### Issue #136: Duplicate SetupWizard property caused product sysprop build failure
+
+**Symptom:**
+- Build aborted with duplicate product property definitions:
+  - `setupwizard.feature.baseline_setupwizard_enabled=true`
+  - `setupwizard.feature.baseline_setupwizard_enabled=false`
+
+**Root Cause Analysis:**
+- Pixel GMS product config already set the property to `true`.
+- Device config added a conflicting override to `false`.
+
+**Fix:**
+- Removed the duplicate `setupwizard.feature.baseline_setupwizard_enabled=false` override.
+- Kept only:
+  - `ro.setupwizard.mode=DISABLED`
+- File updated:
+  - `device/oneplus/instantnoodlep/aosp_instantnoodlep.mk`
+
+**Result:**
+- Product property collision resolved.
+- Build proceeds while still allowing SetupWizard to be bypassed for bring-up debugging.
+
+---
+
+### Issue #137: Original first-boot touch failure was framework/window focus, not kernel touch
+
+**Symptom:**
+- Earlier A16 builds accepted little or no touch input on the first-boot UI.
+- Touch controller and fingerprint HAL appeared to initialize successfully.
+
+**Root Cause Analysis:**
+- Runtime logs showed:
+  - `FocusedWindows: <none>`
+  - SetupWizard window `NOT_VISIBLE`
+  - `ActivityRecordInputSink ... NO_INPUT_CHANNEL`
+  - InputDispatcher rejecting touches because there was no valid focused app window
+- This was a framework/window-focus problem, not a kernel touch driver failure.
+
+**Fix / Mitigation:**
+- Temporarily bypassed SetupWizard with:
+  - `ro.setupwizard.mode=DISABLED`
+- Added the device-specific touch IDC (Issue #135).
+
+**Result:**
+- Launcher now becomes the focused app window.
+- `dumpsys window` shows `com.google.android.apps.nexuslauncher/.NexusLauncherActivity` focused.
+- Original "dead touch" state is resolved.
+
+---
+
+### Issue #138: LiveDisplay lazy AIDL service loop destabilized early boot
+
+**Symptom:**
+- Runtime logs showed repeated waits for:
+  - `vendor.lineage.livedisplay.ISunlightEnhancement/default`
+- `system_server` repeatedly attempted lazy-start.
+- Logs also showed `system_server_pre_watchdog` drops during the same runtime window.
+
+**Evidence:**
+- Initial boot/runtime investigation logs:
+  - `display_fixes.txt`
+  - `a16_after_livedisplay_removal.txt`
+
+**Root Cause Analysis:**
+- The first confirmed problem path was the custom bring-up override rc:
+  - `device/oneplus/instantnoodlep/init/zz_vendor.aidl_hal_overrides.rc`
+- That path declared a lazy AIDL service for the Oplus LiveDisplay HAL.
+- Earlier logs also showed the packaged service lacked a valid SELinux transition/domain, causing startup failure.
+
+**Fix Attempt 1:**
+- Stopped installing:
+  - `zz_vendor.aidl_hal_overrides.rc`
+- Filtered out:
+  - `vendor.lineage.livedisplay-service.oplus`
+- File updated:
+  - `device/oneplus/instantnoodlep/device.mk`
+
+**Result:**
+- On-device verification showed:
+  - `/vendor/etc/init/zz_vendor.aidl_hal_overrides.rc` no longer exists
+- However, `ISunlightEnhancement/default` probe spam still remained, so the override rc was only part of the problem.
+
+---
+
+### Issue #139: LiveDisplay declaration still persisted through Soong/VINTF defaults
+
+**Symptom:**
+- Even after removing the custom init override, logs still showed repeated lazy-start attempts for:
+  - `vendor.lineage.livedisplay.ISunlightEnhancement/default`
+
+**Root Cause Analysis:**
+- Oplus LiveDisplay defaults are controlled by Soong config in:
+  - `hardware/oplus/aidl/livedisplay/Android.bp`
+- Default values include:
+  - `ENABLE_PA=true`
+  - `ENABLE_SE=true`
+- Those defaults install VINTF fragments such as:
+  - `hardware/oplus/aidl/livedisplay/vendor.lineage.livedisplay-service.oplus-pa.xml`
+  - `hardware/oplus/aidl/livedisplay/vendor.lineage.livedisplay-service.oplus-se.xml`
+- Because the service remained declared, framework-side Lineage hardware probing still blocked on `waitForDeclaredService()`.
+
+**Fix Attempt 2:**
+- Explicitly disabled all Oplus LiveDisplay Soong feature flags:
+  - `ENABLE_AB=false`
+  - `ENABLE_AF=false`
+  - `ENABLE_DM=false`
+  - `ENABLE_PA=false`
+  - `ENABLE_SE=false`
+- File updated:
+  - `device/oneplus/instantnoodlep/device.mk`
+
+**Result:**
+- Next rebuild should remove the LiveDisplay AIDL declarations entirely.
+- Runtime validation is still pending until the rebuilt `vendor.img` is flashed.
+
+---
+
+### Issue #140: User 0 remains CE-locked / FRP-active after boot
+
+**Symptom:**
+- Launcher is focused and touch works, but the system is not fully usable.
+- Current runtime state includes:
+  - `ceDataInode=0` for `com.google.android.apps.nexuslauncher`
+  - `dumpsys user` does not show user `0` as `RUNNING` / `UNLOCKED`
+  - repeated `user not unlocked` provider failures
+  - `PersistentDataBlockService` reports FRP remains active
+
+**Evidence:**
+- `a16_after_livedisplay_removal.txt` shows:
+  - `Did not find valid FRP secret, FRP remains active`
+  - repeated `user not unlocked`
+  - Launcher starting with `isUserLocked: true`
+
+**Root Cause Analysis:**
+- This is no longer the original touch/input-focus problem.
+- User 0 credential-encrypted storage is still not available during normal runtime.
+- FRP / persistent-data state is likely interacting with first-boot user unlock state.
+
+**Fix:**
+- Not fixed yet.
+- Current plan is to remove LiveDisplay probing first, then debug the user-unlock / FRP path in isolation.
+
+**Current Status:**
+- **Resolved:** touch input, focused launcher window, SetupWizard property build conflict
+- **Partially mitigated:** LiveDisplay boot destabilization
+- **Open blocker:** user 0 CE unlock / FRP state
+
+---
+
+## Current Runtime Bring-Up Status
+
+**Working:**
+1. Build succeeds again after SetupWizard property cleanup
+2. Device boots on slot `_b`
+3. Touchscreen works
+4. Launcher can become the focused app
+5. Device-specific `touchpanel.idc` is loaded
+
+**Still under active investigation:**
+1. LiveDisplay AIDL declarations must be fully removed/disabled in the flashed vendor image
+2. User `0` remains CE-locked (`ceDataInode=0`)
+3. FRP state remains active during boot
+4. Launcher/Settings usability depends on resolving user unlock state after boot
+
+---
+
+### 141. OT Policy Port - Re-enable Touch/LiveDisplay Bringup Flags
+**Files:**
+- `device/oneplus/instantnoodlep/device.mk`
+- `hardware/oplus/sepolicy/qti/vendor/hal_lineage_touch_default.te` (new)
+- `hardware/oplus/sepolicy/qti/vendor/hal_lineage_livedisplay_qti.te` (new)
+- `hardware/oplus/sepolicy/qti/vendor/vl53l1_daemon_main.te`
+- `hardware/oplus/sepolicy/qti/vendor/file_contexts`
+
+**Issue:**
+Temporary bringup flags disabled Touch/LiveDisplay features to avoid boot-time service loops. However, root cause was missing/incomplete SELinux policy and labels compared to OT reference trees.
+
+**Fix Applied:**
+- Re-enabled Touch feature defaults by removing local force-disable flags (`ENABLE_GM/ENABLE_HTPR/ENABLE_TG=false`).
+- Re-enabled LiveDisplay feature defaults by removing full disable set; kept OT-aligned `ENABLE_SE=false` only.
+- Added missing SELinux domain policy for lineage touch HAL (`hal_lineage_touch_default`).
+- Added missing SELinux domain policy for lineage livedisplay HAL (`hal_lineage_livedisplay_qti`).
+- Restored missing `vl53l1_daemon_main` permissions for `/mnt/vendor`, TOF sysfs, and persist camera paths.
+- Restored file_context labels for:
+  - `/vendor/bin/hw/vendor.lineage.livedisplay-service.oplus`
+  - `/vendor/bin/hw/vendor.lineage.touch-service.oplus`
+
+**Expected Result:**
+- No lazy-start loops caused by unlabeled lineage HAL binaries.
+- `vl53l1_daemon_main` no longer repeatedly crashes due denied `search` on `mnt_vendor_file`.
+- Touch/LiveDisplay behavior can be tested without temporary blanket disable flags.
+
+---
+
+### 142. OT Port Follow-up from Runtime Log (Gray Screen Loop)
+**Files:**
+- `hardware/oplus/sepolicy/qti/vendor/hal_lineage_livedisplay_qti.te`
+- `hardware/oplus/sepolicy/qti/vendor/vl53l1_daemon_main.te`
+- `device/oneplus/instantnoodlep/device.mk`
+
+**Observed in runtime log (`OT_fixes.txt`):**
+- `hal_lineage_livedisplay_qti` denied access to `vndbinder_device`
+- repeated lazy-start loop for `vendor.lineage.livedisplay.IPictureAdjustment/default`
+- `vl53l1_daemon_main` denied `self:capability dac_override`
+
+**Fix Applied:**
+- Added:
+  - `binder_use(hal_lineage_livedisplay_qti)`
+  - `vndbinder_use(hal_lineage_livedisplay_qti)`
+- Added:
+  - `allow vl53l1_daemon_main self:capability dac_override;`
+- Kept most LiveDisplay features enabled but set:
+  - `OPLUS_LINEAGE_LIVEDISPLAY_HAL,ENABLE_PA=false`
+  - `OPLUS_LINEAGE_LIVEDISPLAY_HAL,ENABLE_SE=false`
+
+**Reasoning:**
+- The active loop was specifically `IPictureAdjustment` (PA path), not all LiveDisplay interfaces.
+- This keeps bringup close to OT behavior while avoiding the gray-screen loop for current testing.
+
+---
+
+### 143. Build Failure in `add_8t_things.log` - `dac_override` Neverallow Violation
+**File:**
+- `hardware/oplus/sepolicy/qti/vendor/vl53l1_daemon_main.te`
+- `device/oneplus/sm8250-common/init/init.oplus.rc`
+
+**Error (build):**
+- `neverallow ... (capability (dac_override))` violated by:
+  - `allow vl53l1_daemon_main self:capability dac_override;`
+- From:
+  - `system/sepolicy/private/domain.te:2000`
+
+**Fix Applied:**
+- Removed `allow vl53l1_daemon_main self:capability dac_override;`
+- Kept non-neverallow-safe OT-derived rules (`vendor_persist_camera_file`, `vendor_sysfs_tof`, `mnt_vendor_file`, `sysfs:file r_file_perms`).
+- Added temporary runtime mitigation:
+  - Marked `service vl53l1_daemon_main` as `disabled` in `device/oneplus/sm8250-common/init/init.oplus.rc` to stop boot-time restart loops while continuing bringup.
+
+**Reasoning:**
+- `dac_override` cannot be granted due platform neverallow on this branch.
+- For bringup/testing, disabling auto-start is safer than keeping a hard restart loop.
+
+---
+
+### 144. Runtime SELinux Denials from Perf HAL (`vendor_hal_perf_default` -> `proc_sched`)
+**Files:**
+- `device/oneplus/instantnoodlep/sepolicy/vendor/vendor_hal_perf_default.te` (new)
+
+**Observed in fresh runtime logs:**
+- Repeated denials:
+  - `scontext=u:r:vendor_hal_perf_default:s0`
+  - `tcontext=u:object_r:proc_sched:s0`
+  - denied `{ read }` on `/proc/sys/kernel/sched_*` knobs
+
+**Fix Applied:**
+- Added vendor sepolicy allow:
+  - `allow vendor_hal_perf_default proc_sched:file r_file_perms;`
+
+**Reasoning:**
+- This is a targeted read-only permission for scheduler tuning reads used by perf HAL.
+- It removes recurring SELinux noise without broadening write capabilities.
+
+---
+
+### 145. FRP Gate Blocking Lock Credential Changes (`Cannot change credential while factory reset protection is active`)
+**Files:**
+- `frameworks/base/services/core/java/com/android/server/locksettings/LockSettingsService.java`
+- `frameworks/base/services/core/java/com/android/server/locksettings/LockSettingsStorage.java`
+
+**Observed in runtime logs:**
+- Lock setup UI failed with:
+  - `SecurityException: Cannot change credential while factory reset protection is active`
+- Shell lock test failed with:
+  - `SecurityException: FRP is active` from `PersistentDataBlockService` during FRP handle sync.
+- Device state had:
+  - `FRP state: true`
+  - `Has FRP credential handle: false`
+
+**Fix Applied:**
+- In `LockSettingsService.enforceFrpNotActive()`:
+  - allow credential change when FRP is active but `readPersistentDataBlock() == PersistentData.NONE`.
+- In `LockSettingsStorage.writePersistentDataBlock()`:
+  - catch `SecurityException` from PDB writes and allow continuation for the same FRP-active/no-handle state.
+
+**Result:**
+- `locksettings set-pin` succeeds and lock credential can be changed again.
+
+---
+
+### 146. Fingerprint Enroll Not Capturing (`enable_tp fail`, callback null) + Perf Write Denials
+**Files:**
+- `device/oneplus/instantnoodlep/sepolicy/vendor/hal_fingerprint_default.te`
+- `hardware/oplus/sepolicy/qti/vendor/vendor_hal_perf_default.te`
+
+**Observed in runtime logs:**
+- Fingerprint enroll start showed:
+  - `OpticalFingerprint enroll`
+  - `enable_tp fail, err code : 1016`
+  - `GF_ERROR_OPEN_DEVICE_FAILED`
+- Concurrent SELinux denial:
+  - `scontext=u:r:hal_fingerprint_default:s0`
+  - denied `search` on `vendor_proc_display` (`touchpanel` path).
+- Perf HAL still logged repeated write denials on `proc_sched`.
+
+**Fix Applied:**
+- Added:
+  - `r_dir_file(hal_fingerprint_default, vendor_proc_display)`
+- Added canonical perf allow in Oplus policy:
+  - `allow vendor_hal_perf_default proc_sched:file rw_file_perms;`
+- Rebuilt and flashed updated `vendor.img` containing both rules.
+
+**Validation Snapshot:**
+- On-device `/vendor/etc/selinux/vendor_sepolicy.cil` now contains:
+  - `hal_fingerprint_default` access to `vendor_proc_display`
+  - `vendor_hal_perf_default` write-capable allow to `proc_sched_202504`
+
+---
+
+### 147. Ensure Runtime Uses Current SELinux Policy (Disable Precompiled ODM Policy)
+**Files:**
+- `device/oneplus/instantnoodlep/device.mk`
+
+**Observed:**
+- Policy updates were compiled, but runtime behavior still matched stale policy in some boots.
+- Device had precompiled policy artifacts under `/odm/etc/selinux/`, which can override freshly built split policy during bring-up.
+
+**Fix Applied:**
+- Set:
+  - `PRODUCT_PRECOMPILED_SEPOLICY := false`
+- Rebuilt `odmimage`.
+- Flashed updated `odm` partition on active slot.
+- Verified on device:
+  - `/odm/etc/selinux/precompiled_sepolicy*` no longer present.
+
+**Result:**
+- Runtime now consistently reflects current in-tree SELinux policy updates during debugging cycles.
+
+---
+
+### 148. Fingerprint Final Capture Fix (`fp_enable` write denial)
+**Files:**
+- `device/oneplus/instantnoodlep/sepolicy/vendor/hal_fingerprint_default.te`
+
+**Observed in runtime logs:**
+- Fingerprint enrollment opened but did not capture progress.
+- SELinux denial:
+  - `scontext=u:r:hal_fingerprint_default:s0`
+  - denied `{ write }` on `vendor_proc_display` file (`fp_enable` touchpanel path).
+
+**Fix Applied:**
+- Kept directory access:
+  - `r_dir_file(hal_fingerprint_default, vendor_proc_display)`
+- Added file read/write access:
+  - `allow hal_fingerprint_default vendor_proc_display:file rw_file_perms;`
+- Rebuilt `vendorimage` and flashed updated `vendor` partition on active slot.
+
+**Validation:**
+- Enrollment flow now reaches normal capture/progress path.
+- User confirmed fingerprint enrollment capture is working.
+
+---
+
+### 149. Post-Fix Runtime Snapshot (After Fingerprint Capture Works)
+**Evidence file:**
+- `/tmp/instantnoodlep_post_working.log`
+
+**Current status:**
+- No `Fatal signal` / `FATAL EXCEPTION` in captured runtime window.
+- No recurrence of earlier blockers:
+  - `GF_ERROR_OPEN_DEVICE_FAILED`
+  - LiveDisplay `IPictureAdjustment/default` lazy-start loop
+  - `hal_lineage_livedisplay_qti` `vndbinder` denial pattern
+
+**Residual SELinux noise (non-blocking at current functionality):**
+- `hal_fingerprint_default` -> `vendor_sysfs_battery_supply` (`search`) : repeated
+- `hal_fingerprint_default` -> `proc` `tee_bind_core` (`write`) : repeated
+
+**Feature flags still intentionally disabled in this tree:**
+- `OPLUS_LINEAGE_LIVEDISPLAY_HAL,ENABLE_SE=false`
+- `OPLUS_LINEAGE_LIVEDISPLAY_HAL,ENABLE_PA=false`
+- `service vl53l1_daemon_main` remains `disabled` in `device/oneplus/sm8250-common/init/init.oplus.rc` (temporary mitigation from Issue #143)
+
+**Bring-up note:**
+- Keep current flags for stable baseline.
+- Re-enable in controlled steps (SE first, then PA) only after targeted log validation per change.
+
+---
+
+### 150. Fingerprint Residual AVC Cleanup (`vendor_sysfs_battery_supply`, `tee_bind_core`)
+**Files:**
+- `device/oneplus/instantnoodlep/sepolicy/vendor/hal_fingerprint_default.te`
+- `device/oneplus/instantnoodlep/sepolicy/vendor/genfs_contexts` (new)
+
+**Observed in latest runtime log (`/tmp/instantnoodlep_post_working.log`):**
+- `hal_fingerprint_default` denied `search` on `vendor_sysfs_battery_supply` (`battery` dir)
+- `hal_fingerprint_default` denied `write` on `/proc/tee_bind_core` (currently labeled generic `proc`)
+
+**Fix Applied:**
+- Added battery supply read traversal:
+  - `r_dir_file(hal_fingerprint_default, vendor_sysfs_battery_supply)`
+- Added dedicated SELinux label for proc node:
+  - `type vendor_proc_tee_bind_core, fs_type, proc_type;`
+  - `genfscon proc /tee_bind_core u:object_r:vendor_proc_tee_bind_core:s0`
+- Granted targeted access to the newly labeled node:
+  - `allow hal_fingerprint_default vendor_proc_tee_bind_core:file rw_file_perms;`
+
+**Build Validation:**
+- `m vendorimage -j10` completed successfully after this policy update.
+
+**Runtime Validation:**
+- Pending flash and fresh log capture.
+
+---
+
+### 151. LiveDisplay Step Test #1 - Re-enable `ENABLE_SE` only
+**File:**
+- `device/oneplus/instantnoodlep/device.mk`
+
+**Change:**
+- `OPLUS_LINEAGE_LIVEDISPLAY_HAL,ENABLE_SE` switched to `true`
+- `OPLUS_LINEAGE_LIVEDISPLAY_HAL,ENABLE_PA` kept `false`
+
+**Build/Flash:**
+- `m vendorimage -j10` completed successfully.
+- Flashed updated `vendor` on active slot (`vendor_b`).
+
+**Validation snapshot:**
+- Clean short-window log after buffer clear:
+  - `/tmp/instantnoodlep_se_on_clean.log`
+- Targeted checks:
+  - `avc: denied` count: `0`
+  - `IPictureAdjustment` / `ISunlightEnhancement` / `hal_lineage_livedisplay_qti` loop markers: `0`
+  - fingerprint residual markers (`tee_bind_core`, `vendor_sysfs_battery_supply`, `GF_ERROR_OPEN_DEVICE_FAILED`): `0`
+
+**Result:**
+- SE-only re-enable appears stable in current capture window.
+
+---
+
+### 152. LiveDisplay Step Test #2 (`ENABLE_PA=true`) - Regression Reproduced
+**Files involved:**
+- `device/oneplus/instantnoodlep/device.mk`
+
+**Change under test:**
+- `OPLUS_LINEAGE_LIVEDISPLAY_HAL,ENABLE_PA=true` (with `ENABLE_SE=true`)
+
+**Observed after flash:**
+- Black/no-home usable state reported.
+- Repeating lazy start loop:
+  - `vendor.lineage.livedisplay.ISunlightEnhancement/default`
+- LiveDisplay HAL repeatedly crashed:
+  - `Fatal signal 6 ... pid ... vendor.lineage...`
+- SELinux denials at failure point:
+  - `hal_lineage_livedisplay_qti` denied `{ find }` on `vendor_qdisplay_service`
+  - then denied `{ call }` to `hal_graphics_composer_default` (`tclass=binder`)
+
+**Evidence:**
+- `/tmp/instantnoodlep_pa_on_clean.log`
+- `/tmp/instantnoodlep_black_now.log`
+
+---
+
+### 153. LiveDisplay PA Bring-up Policy Fixes (service lookup + binder call)
+**Files:**
+- `device/oneplus/instantnoodlep/sepolicy/vendor/hal_lineage_livedisplay_qti.te`
+
+**Fix Applied:**
+- Added service manager lookup permission:
+  - `allow hal_lineage_livedisplay_qti vendor_qdisplay_service:service_manager find;`
+- Added binder call permission to composer HAL:
+  - `allow hal_lineage_livedisplay_qti hal_graphics_composer_default:binder call;`
+
+**Rationale:**
+- LiveDisplay HAL needs qdisplay service discovery and binder IPC to graphics composer path during init.
+- Missing permissions caused abort, which triggered repeated framework lazy-start retries.
+
+---
+
+### 154. LiveDisplay Step Test #3 (`ENABLE_PA=true`) - Stable After Policy Fix
+**Files:**
+- `device/oneplus/instantnoodlep/device.mk`
+- `device/oneplus/instantnoodlep/sepolicy/vendor/hal_lineage_livedisplay_qti.te`
+
+**State under test:**
+- `ENABLE_SE=true`
+- `ENABLE_PA=true`
+
+**Build/Flash:**
+- `m vendorimage -j10` succeeded.
+- Flashed updated `vendor_b`.
+
+**Validation snapshot:**
+- Clean runtime capture:
+  - `/tmp/instantnoodlep_pa_attempt3_clean.log`
+- No LiveDisplay crash-loop markers in capture:
+  - no `ISunlightEnhancement` lazy-start spam
+  - no `Fatal signal` from `vendor.lineage.livedisplay-service.oplus`
+- Runtime processes present:
+  - `vendor.lineage.livedisplay-service.oplus`
+  - `vendor.lineage.touch-service.oplus`
+  - fingerprint HAL service
+- Window focus shows launcher active (no black-screen stuck state):
+  - `mFocusedApp=...NexusLauncherActivity`
+  - focused window present (`NotificationShade`/launcher path), not `<none>`
+
+**Result:**
+- PA path is now functioning with current policy updates.
+
+---
+
+### 155. `vl53l1_daemon_main` Re-enable Attempt and Rollback (Not Safe on Current Branch)
+**Files touched during test:**
+- `device/oneplus/instantnoodlep/device.mk`
+- `device/oneplus/instantnoodlep/init/zz_vl53l1_daemon_override.rc` (temporary, later removed)
+
+**Goal:**
+- Re-enable the currently disabled `vl53l1_daemon_main` service without editing `sm8250-common`.
+
+**Attempt:**
+- Added a local ODM init override (`zz_vl53l1_daemon_override.rc`) to remove `disabled` behavior.
+- Rebuilt and flashed `odm.img`.
+
+**Observed runtime behavior (immediate regression):**
+- `init` repeatedly started and killed `vl53l1_daemon_main`.
+- SELinux denial on each start:
+  - `{ dac_override }` for `scontext=u:r:vl53l1_daemon_main:s0`
+- Repeated:
+  - `Service 'vl53l1_daemon_main' ... exited with status 255`
+  - `process with updatable components 'vl53l1_daemon_main' exited 4 times in 4 minutes`
+
+**Conclusion:**
+- On this branch, re-enabling this daemon is not currently safe.
+- The required `dac_override` capability path remains blocked (neverallow-constrained earlier in bring-up).
+
+**Rollback:**
+- Removed the local override rc and copy rule.
+- Rebuilt/flashed `odm.img` again.
+- Post-rollback logs no longer show `vl53l1_daemon_main` restart storms.
+
+**Current stable state after rollback:**
+- LiveDisplay remains enabled (`ENABLE_SE=true`, `ENABLE_PA=true`) and service stays up.
+- Fingerprint HAL healthy.
+- Only minor non-blocking SELinux noise observed in clean window:
+  - `vendor_hal_neuralnetworks_default` reading `default_prop`.
+
+---
+
+### 156. Current Stable Bring-up Endpoint (This Session)
+**Enabled and validated:**
+- LiveDisplay `ENABLE_SE=true`
+- LiveDisplay `ENABLE_PA=true`
+- Fingerprint enrollment/auth path (with `vendor_proc_display` + `tee_bind_core` policy fixes)
+- Normal launcher focus/home path after boot
+
+**Kept intentionally as-is:**
+- `PRODUCT_PRECOMPILED_SEPOLICY := false` (to avoid stale ODM precompiled policy overriding in-tree policy during bring-up)
+- `vl53l1_daemon_main` remains disabled in common init (re-enable attempt reproduced `dac_override` restart storm)
+
+**Latest validation artifacts:**
+- `/tmp/instantnoodlep_pa_attempt3_clean.log` (PA-enabled stable window)
+- `/tmp/instantnoodlep_post_vl53_rollback.log` (post-rollback stable window)
+
+---
+
+### 157. Full Package Build Validation (`m bacon`) - Success
+**Build command used:**
+- `WITH_ADB_INSECURE=true INSECURE_ADB_DEBUG=true m bacon -j10`
+
+**Result:**
+- Full build completed successfully.
+- OTA package generated:
+  - `out/target/product/instantnoodlep/lineage-.zip`
+
+**Notes:**
+- OTA generation printed expected warnings about missing `build.prop` reads in some `*_dlkm` partitions and disabled zucchini/lz4diff optimization paths.
+- No blocking build failure occurred; package creation completed.
+
+---
+
+### 158. Full Flash Execution + Post-Flash Review (Slot `b`)
+**Flash source:**
+- `out/target/product/instantnoodlep/lineage-.zip`
+
+**Flash method:**
+- Full payload extraction + partition flash
+- Forced active slot: `b`
+- Flashed boot chain + dynamic partitions in fastbootd
+- Wiped metadata and userdata (`fastboot -w`)
+
+**Post-flash runtime checks:**
+- `sys.boot_completed=1`
+- `ro.boot.slot_suffix=_b`
+- Launcher app focused (`NexusLauncherActivity`)
+- Key HAL services running:
+  - `vendor.lineage.touch-service.oplus`
+  - `vendor.lineage.livedisplay-service.oplus`
+  - `vendor.oplus.hardware.biometrics.fingerprint@2.1-service`
+  - `sensors.qti`
+- Clean log window (`/tmp/instantnoodlep_post_fullflash_review.log`):
+  - `avc: denied` count: `0`
+  - no fatal crash markers / ANR / LiveDisplay loop / `vl53` restart storm
+  - only benign fingerprint watchdog scheduler noise observed
+
+**Note:**
+- Because this was a full wipe, lock credential and enrolled fingerprints are reset (`count=0`) and must be reconfigured.
+
+---
+
+### 159. Volume Panel Side Default Restored (Left)
+**Issue:**
+- Volume panel defaulted to right side after clean flash, while physical volume keys are on the left.
+
+**Fix:**
+- Added/kept SystemUI overlay default:
+  - `overlay/OPlusSystemUIResTarget/res/values/custom_config.xml`
+  - `<bool name="config_audioPanelOnLeftSide">true</bool>`
+- Runtime setting verified with:
+  - `settings get system volume_panel_on_left = 1`
+
+**Result:**
+- Volume panel appears on the left as expected.
+
+---
+
+### 160. Alert Slider Framework Hook Restoration (In-Tree)
+**Issue:**
+- Alert Slider events were present at kernel/input level (`oplus,hall_tri_state_key`, `KEY_F3`) but no framework-level slider behavior was triggered.
+
+**Root cause:**
+- The current tree did not provide framework resource overrides for:
+  - `config_hasAlertSlider`
+  - `config_deviceKeyHandlerLibs`
+  - `config_deviceKeyHandlerClasses`
+- Without these, `PhoneWindowManager` does not load `org.lineageos.settings.device.KeyHandler`.
+
+**Fix applied:**
+- Updated:
+  - `overlay/OPlusFrameworksResTarget/res/values/config.xml`
+- Added:
+  - `config_hasAlertSlider = true`
+  - `config_deviceKeyHandlerLibs = /system_ext/app/KeyHandler/KeyHandler.apk`
+  - `config_deviceKeyHandlerClasses = org.lineageos.settings.device.KeyHandler`
+  - `config_oemFastChargerStatusPath = /sys/devices/virtual/oplus_chg/battery/voocchg_ing`
+
+**Validation evidence gathered before flash:**
+- Slider input device present:
+  - `getevent -pl` shows `name: "oplus,hall_tri_state_key"` and `KEY_F3`
+- Kernel slider activity present during reproduce window:
+  - `/tmp/instantnoodlep_slider_repro.log` with multiple `[tri_state_key] ... report ... successful`
+
+**Next required step:**
+- Rebuild and flash partition containing `OPlusFrameworksResTarget` (full `m bacon` + full flash on slot `b` recommended), then retest:
+  - Alert slider mode switching
+  - Media/notification audio behavior
+
+---
+
+### 161. Audio Runtime Deep Check (Current Build, Pre-Alert-Slider-Overlay-Flash)
+**Captured logs:**
+- `/tmp/instantnoodlep_audio_repro.log`
+
+**Findings:**
+- Audio stack active and routing to speaker:
+  - `Output devices: AUDIO_DEVICE_OUT_SPEAKER`
+  - `Master mute: off`
+  - `Ringer mode (internal/external): NORMAL`
+  - `STREAM_MUSIC` volume observed at max (`30/30`)
+- No fatal audio-service crash loop observed.
+
+**Interpretation:**
+- Core audio path is alive in current runtime.
+- Remaining user-facing no-sound behavior should be rechecked after Alert Slider framework hook fix is flashed.
+
+---
+
+### 162. Unlock Bootloop Root Cause (After Alert Slider Hook Enable)
+**Symptom:**
+- Device booted, but entering unlock path caused repeated reboot/system_server death behavior.
+
+**Captured evidence:**
+- `/tmp/instantnoodlep_unlock_bootloop.log`
+- Fatal in `system_server`:
+  - `Error receiving broadcast ... org.lineageos.settings.device.KeyHandler`
+  - `FileNotFoundException: /proc/tristatekey/tri_state: open failed: EACCES (Permission denied)`
+- AVC:
+  - `scontext=u:r:system_server:s0 tcontext=u:object_r:vendor_proc_tri_state_key:s0 tclass=dir { search } denied`
+
+**Conclusion:**
+- Alert Slider framework hook was correct, but SELinux policy lacked `system_server` read access to tri-state proc node.
+
+---
+
+### 163. Fix Applied: Alert Slider + SELinux Access
+**Files changed:**
+- `overlay/OPlusFrameworksResTarget/res/values/config.xml`
+  - `config_hasAlertSlider=true`
+  - `config_deviceKeyHandlerLibs=/system_ext/app/KeyHandler/KeyHandler.apk`
+  - `config_deviceKeyHandlerClasses=org.lineageos.settings.device.KeyHandler`
+- `sepolicy/vendor/system_server.te` (new)
+  - allow `system_server` to read/search `vendor_proc_tri_state_key`
+
+**Build + flash performed (slot `b`):**
+- `m vendorimage -j10` (success)
+- `m odmimage -j10` (success)
+- Flashed:
+  - `vendor.img`
+  - `odm.img`
+
+---
+
+### 164. Post-Fix Validation
+**Logs:**
+- `/tmp/instantnoodlep_unlock_after_fix.log`
+- `/tmp/instantnoodlep_slider_audio_after_fix.log`
+
+**Results:**
+- No `system_server` fatal crash from KeyHandler on unlock.
+- Alert Slider events are processed and mode changes are applied:
+  - `internal_ringer_mode_changed` transitions seen (`silent`, `normal`, `vibrate`)
+- Tri-state kernel positions include 0/1/2 and report success (`up/down/mid key successful`).
+- Media stream volume remains high (`STREAM_MUSIC 30/30`), while ring mode follows slider state.
+
+---
+
+### 165. YouTube Playback Without Audible Sound (Speaker Path Debug)
+**Symptom (March 6, 2026):**
+- YouTube/Chrome playback is running, media volume max, but no audible speaker output.
+
+**Evidence captured:**
+- `/tmp/instantnoodlep_youtube_nosound_now.log`
+- `/tmp/instantnoodlep_dumpsys_audio_now2.txt`
+- `/tmp/instantnoodlep_audioflinger_now2.txt`
+
+**Key observations:**
+- Framework and AudioFlinger are active and not muted:
+  - `AudioPlaybackConfiguration ... usage=USAGE_MEDIA ... state=started`
+  - output route is `AUDIO_DEVICE_OUT_SPEAKER`
+  - `Master mute: off`, stream mute false, ringer normal
+  - active output track present with non-zero signal power history
+- Audio HAL applies speaker route:
+  - `enable_audio_route ... deep-buffer-playback speaker`
+  - `audio_route: Apply path: speaker`
+- No blocking AVC denial found for audio in captured window.
+- Repeated known non-fatal HAL warning still present:
+  - `Could not get ctl for mixer cmd - Audio Stream Capture 32 App Type Cfg`
+
+**Applied device-side mitigation in tree:**
+- File: `vendor.prop`
+- Added:
+  - `persist.vendor.audio.speaker.prot.enable=true`
+
+**Why this was added:**
+- Prior boot logs showed speaker-protection init with `Speaker protection disabled`.
+- For this no-audio case (with correct upper-stack routing), forcing speaker-protection enable at boot is a targeted vendor-property test to recover physical speaker bring-up.
+
+---
+
+### 166. ADB Root Status Check (March 6, 2026)
+**Question:** can adb root be enabled for deeper debugging?
+
+**Current runtime state:**
+- `ro.debuggable=0`
+- `ro.secure=1`
+- `ro.adb.secure=0`
+- `adb root` response: `ADB Root access is disabled by system setting - enable in Settings -> System -> Developer options`
+
+**Conclusion:**
+- Current flashed build behaves as `user` for debug flags (`ro.debuggable=0`), so adbd root is not available at runtime.
+- Proper path is a full `userdebug`/`eng` flash (boot/system/vendor from same build), then enable rooted debugging in Developer options.
+
+---
+
+### 167. Audio Bring-up Override Update (No-Sound Speaker Path)
+**Reason for change:**
+- Speaker playback remained silent.
+- Earlier logs showed speaker-protection path init attempts and failures on this bring-up stack.
+- `sm8250-common` already sets `vendor.audio.feature.spkr_prot.enable=true`.
+
+**File changed:**
+- `vendor.prop`
+
+**New overrides:**
+- `persist.vendor.audio.speaker.prot.enable=false`
+- `vendor.audio.feature.spkr_prot.enable=false`
+
+**Intent:**
+- Force non-protected speaker path during bring-up to validate whether speaker-protection path is the blocker.
+- This is a debug/workaround step, not final production tuning.
+
+---
+
+### 168. Build Failure + Audio Override Adjustment
+**Failure observed while rebuilding `vendorimage`:**
+- `post_process_props` rejected duplicate assignments:
+  - `vendor.audio.feature.spkr_prot.enable=true`
+  - `vendor.audio.feature.spkr_prot.enable=false`
+
+**Cause:**
+- `sm8250-common/vendor.prop` already defines `vendor.audio.feature.spkr_prot.enable=true`.
+- Local override in `instantnoodlep/vendor.prop` introduced conflicting duplicate key.
+
+**Adjustment:**
+- Removed local `vendor.audio.feature.spkr_prot.enable=false` override.
+- Kept only:
+  - `persist.vendor.audio.speaker.prot.enable=false`
+
+**Rationale:**
+- Avoid duplicate-property build failure.
+- Still test non-protected speaker path via persist property for bring-up debugging.
+
+---
+
+### 169. Shake Control Investigation: Missing Full Sensor HAL Registration
+**Symptom:**
+- Shake control not working.
+- `dumpsys sensorservice` showed only ~12 basic sensors (mostly ALS/prox), no full motion stack.
+
+**Boot evidence (March 6, 2026):**
+- Repeated errors at boot:
+  - `Could not find 'aidl/android.hardware.sensors.ISensors/default' for ctl.interface_start`
+  - servicemanager repeatedly failed to start/find `android.hardware.sensors.ISensors/default`
+- VINTF declares `android.hardware.sensors` AIDL (`ISensors/default`) via vendor manifest fragment.
+
+**Root cause hypothesis:**
+- Sensors multihal service was running as a process, but init lacked/was missing effective AIDL interface mapping for lazy service startup, so framework binding path broke early.
+
+**Fix applied in tree:**
+- Updated `device.mk` to install override rc:
+  - `init/zz_vendor.aidl_hal_overrides.rc` -> `/vendor/etc/init/zz_vendor.aidl_hal_overrides.rc`
+- This override explicitly publishes:
+  - `interface aidl android.hardware.sensors.ISensors/default` on `vendor.sensors-hal-multihal`
+
+**Next action:**
+- Rebuild + flash `vendor.img`.
+- Reboot and validate:
+  - no `ctl.interface_start` failures for `ISensors/default`
+  - accelerometer/gyro and gesture-related sensors appear in `dumpsys sensorservice`
+  - shake control behavior retest.
+
+---
+
+### 170. Sensors HAL AVC Denials Blocking Full Motion Stack
+**After fix 169 (AIDL init override):**
+- `ctl.interface_start` for `aidl/android.hardware.sensors.ISensors/default` is now processed.
+- But `ISensors/default` still does not fully bind, and only ~12 basic sensors are present.
+
+**Direct process evidence (`android.hardware.sensors-service.multihal`):**
+- AVC denials in `hal_sensors_default` domain:
+  - denied `{ search }` on `vendor_proc_oplus_version` (`/proc/oplusVersion`)
+  - denied `{ search }` on `vendor_sysfs_graphics` (`/sys/kernel/oplus_display`)
+
+**Fix applied:**
+- Added `sepolicy/vendor/hal_sensors_default.te` in device overlay with:
+  - `r_dir_file(hal_sensors_default, vendor_proc_oplus_version)`
+  - `r_dir_file(hal_sensors_default, vendor_sysfs_graphics)`
+
+**Goal:**
+- Remove sensor HAL probe/init denials so full sensor list (accel/gyro/gesture) can initialize and restore shake control.
+
+---
+
+### 171. Root-Cause Revalidation (User Review Follow-up)
+**Date:** March 6, 2026
+
+**User hypothesis checked:**
+- A previously deactivated policy set broke shake control and speaker output.
+
+**What was confirmed in current tree/logs:**
+- `hardware/oplus/sepolicy/qti/vendor/vendor_sensors.te` is currently empty (0 bytes).
+- Historical logs show repeated AVC from `vendor_sensors` domain:
+  - denied `{ search }` on `vendor_persist_engineer_file` (process `sscrpcd`)
+- Sensors HAL logs showed mandatory motion sensors missing:
+  - `accel`, `gyro`, `gyro_cal`, `mag`, `mag_cal`, `rotv`
+- Device-local override still forced:
+  - `persist.vendor.audio.speaker.prot.enable=false`
+  - This matched repeated runtime logs reporting `Speaker protection disabled`.
+
+**Conclusion:**
+- The hypothesis was materially correct for current state:
+  - sensor policy regression was still present (empty `vendor_sensors.te` upstream path),
+  - audio remained in bring-up override mode.
+
+---
+
+### 172. Fix Applied: Restore Sensor Policies + Re-enable Speaker Protection
+**Files changed:**
+- `sepolicy/vendor/hal_sensors_default.te` (expanded)
+- `sepolicy/vendor/vendor_sensors.te` (new)
+- `vendor.prop` (audio override rollback)
+
+**Policy restores applied in device overlay:**
+- `hal_sensors_default`:
+  - restore access to calibration/probe nodes (`vendor_proc_eng_cali_file`, `vendor_proc_oplus_als_file`, `vendor_proc_oplus_version`, `vendor_proc_ultrasound`)
+  - restore write/read access to `vendor_persist_engineer_file`, `vendor_proc_display`, `vendor_sysfs_graphics`, `vendor_sysfs_sensor_fb`
+  - restore chr-file access for `ssc_interactive_device`, `ultrasound_device`
+- `vendor_sensors`:
+  - restore rw access to `vendor_persist_camera_file`, `vendor_persist_engineer_file`, `vendor_proc_eng_cali_file`, `vendor_proc_oplus_version`, `vendor_sysfs_sensor_fb`
+
+**Audio rollback applied:**
+- `vendor.prop`:
+  - changed to `persist.vendor.audio.speaker.prot.enable=true`
+- Intent: return to normal smart-amp/speaker-protection path (remove debug bypass).
+
+---
+
+### 173. Build Validation After Fixes
+**SELinux check:**
+- `m sepolicy_neverallows -j10` passed.
+
+**Artifact built:**
+- `m vendorimage -j10` passed.
+- Output:
+  - `out/target/product/instantnoodlep/vendor.img`
+  - timestamp `2026-03-06 13:01:20 +0100`
+  - size `547,958,784` bytes
+
+---
+
+### 174. Feature-Reenable Audit From Historical Deletions
+**Date:** March 6, 2026
+
+**User review points checked against current tree:**
+1. `vl53l1_daemon_main` (TOF autofocus daemon)
+   - Still disabled in `device/oneplus/sm8250-common/init/init.oplus.rc`.
+   - This is still a real deactivation in current baseline.
+2. Power/camera/charger/horae policy deletions from early migration section
+   - Current policy tree now includes:
+     - `hal_power_default.te`
+     - `hal_camera_default.te`
+     - `horae.te`
+     - `hal_oplus_charger_aidl.te`
+   - Legacy file names from early notes (`hal_lineage_power_default.te`, `hal_charger_default.te`, `oplus_horae.te`) are not the active policy names on this branch.
+3. Dexpreopt
+   - No active makefile enforcement of `WITH_DEXPREOPT=false` was found in current device/common build files.
+   - Current no-dexpreopt behavior is command-line driven when explicitly passed during build.
+
+**Conclusion:**
+- `vl53l1_daemon_main` remained the main still-disabled hardware feature from this group.
+- The broad power/camera/horae stack is not globally disabled by current policy naming.
+
+---
+
+### 175. `vl53l1_daemon_main` Controlled Re-enable (No Restart Storm)
+**Goal:**
+- Re-enable TOF daemon bring-up without returning to the previous crash/restart storm behavior.
+
+**Files changed:**
+- `device/oneplus/instantnoodlep/init/zz_vl53l1_daemon_override.rc` (new)
+- `device/oneplus/instantnoodlep/device.mk`
+
+**Override strategy:**
+- Added ODM init override service with:
+  - `override`
+  - `class late_start`
+  - `oneshot` (prevents repeated restart storm if daemon exits)
+  - run as `cameraserver` (`user cameraserver`, `group cameraserver system`)
+  - removed disabled behavior by overriding original disabled service stanza
+
+**Packaging:**
+- Added copy rule:
+  - `init/zz_vl53l1_daemon_override.rc` -> `/odm/etc/init/zz_vl53l1_daemon_override.rc`
+
+**Rationale:**
+- We cannot rewrite proprietary daemon code in-tree.
+- This is a safe incremental enable attempt that can restore functionality while containing failure mode.
+
+---
+
+### 176. Branch-to-Branch Audit Restore (Using Fork + Upstream Baselines)
+**Date:** March 6, 2026
+
+**Audit method:**
+- Compared current `a16-bringup-fixes` branches against:
+  - `fork/lineage-23.2`
+  - `github/lineage-23.2`
+
+**Key findings:**
+- `sm8250-common/init.oplus.rc` has `vl53l1_daemon_main` disabled in baseline lineage branch as well.
+- In `hardware/oplus` current branch, several policy rules present on upstream `github/lineage-23.2` were removed (audio/touch/power/camera/horae/system_server/vl53l1/sensors related).
+
+**Device-overlay restores added to avoid editing upstream repos directly:**
+- `sepolicy/vendor/hal_audio_default.te`
+  - restore `rw_dir_file(hal_audio_default, vendor_sysfs_usb_supply)`
+- `sepolicy/vendor/hal_camera_default.te`
+  - restore `rw_dir_file(hal_camera_default, vendor_proc_camera)`
+  - restore `rw_dir_file(hal_camera_default, vendor_sysfs_tof)`
+- `sepolicy/vendor/hal_power_default.te`
+  - restore `rw_dir_file(hal_power_default, vendor_proc_display)`
+  - restore `rw_dir_file(hal_power_default, vendor_sysfs_sde_crtc)`
+- `sepolicy/vendor/horae.te`
+  - restore `r_dir_file(horae, vendor_proc_oplus_version)`
+  - restore `rw_dir_file(horae, proc_horae)`
+- `sepolicy/vendor/oplus_touchdaemon.te`
+  - restore proc/horae/vendor-data/display access rules
+- `sepolicy/vendor/vl53l1_daemon_main.te`
+  - restore camera persist + TOF sysfs + `/mnt/vendor` access rules
+- `sepolicy/vendor/system_server.te`
+  - restore `rw_dir_file(system_server, vendor_proc_oplus_scheduler)`
+
+**Additional status clarification:**
+- No active makefile-level forced `WITH_DEXPREOPT=false` flag was found in current device/common build files; this behavior is command-line controlled if explicitly passed.
+
+---
+
+### 177. Validation + Artifacts After Restore Set
+**SELinux validation:**
+- `m sepolicy_neverallows -j10` passed after restores.
+
+**Built artifacts (BP3A userdebug):**
+- `m vendorimage odmimage -j10` passed.
+- Outputs:
+  - `out/target/product/instantnoodlep/vendor.img` (`2026-03-06 18:07`, 523M)
+  - `out/target/product/instantnoodlep/odm.img` (`2026-03-06 18:07`, 84M)

@@ -1,0 +1,4 @@
+on post-fs-data
+    start vendor.touch-hal
+    start fps_hal
+    start vendor.fps_hal_oplus

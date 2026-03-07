@@ -1,0 +1,5 @@
+# Restore touchdaemon accesses removed from branch policy.
+rw_dir_file(oplus_touchdaemon, proc_bus_input)
+rw_dir_file(oplus_touchdaemon, proc_horae)
+rw_dir_file(oplus_touchdaemon, vendor_data_file)
+rw_dir_file(oplus_touchdaemon, vendor_proc_display)

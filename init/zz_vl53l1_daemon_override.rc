@@ -1,0 +1,11 @@
+# Re-enable TOF daemon with a safer runtime profile for bring-up:
+# - no disabled flag
+# - no auto-restart storm if it exits (oneshot)
+# - run as cameraserver to avoid root DAC bypass paths
+service vl53l1_daemon_main /odm/bin/vl53l1_daemon_main
+    override
+    class late_start
+    oneshot
+    user cameraserver
+    group cameraserver system
+    socket vl53l1_daemon stream 660 cameraserver system

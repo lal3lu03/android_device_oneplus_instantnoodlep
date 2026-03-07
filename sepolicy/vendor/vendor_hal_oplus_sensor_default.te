@@ -1,0 +1,4 @@
+# Allow OPlus sensor HAL server to access persist sensor/engineer directories
+# used during early calibration and sensor list bring-up.
+r_dir_file(vendor_hal_oplus_sensor_default, vendor_persist_engineer_file)
+r_dir_file(vendor_hal_oplus_sensor_default, vendor_persist_sensors_file)

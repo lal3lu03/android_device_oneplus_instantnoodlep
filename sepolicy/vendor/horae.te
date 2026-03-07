@@ -1,0 +1,3 @@
+# Restore horae daemon reads/writes removed from branch policy.
+r_dir_file(horae, vendor_proc_oplus_version)
+rw_dir_file(horae, proc_horae)

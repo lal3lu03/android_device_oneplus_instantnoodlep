@@ -1,0 +1,4 @@
+# Allow alert slider KeyHandler (running in system_server) to read tri-state state.
+allow system_server vendor_proc_tri_state_key:dir search;
+allow system_server vendor_proc_tri_state_key:file r_file_perms;
+rw_dir_file(system_server, vendor_proc_oplus_scheduler)

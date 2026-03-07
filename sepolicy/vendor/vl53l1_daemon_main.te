@@ -1,0 +1,4 @@
+# Restore TOF daemon path accesses removed from branch policy.
+r_dir_file(vl53l1_daemon_main, vendor_persist_camera_file)
+r_dir_file(vl53l1_daemon_main, vendor_sysfs_tof)
+rw_dir_file(vl53l1_daemon_main, mnt_vendor_file)

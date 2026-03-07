@@ -1,0 +1,1 @@
+genfscon proc /tee_bind_core u:object_r:vendor_proc_tee_bind_core:s0

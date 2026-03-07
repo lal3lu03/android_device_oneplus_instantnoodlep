@@ -1,0 +1,8 @@
+service vendor.touch-hal /vendor/bin/hw/vendor.lineage.touch-service.oplus
+    override
+    class hal
+    user system
+    group system
+    interface aidl vendor.lineage.touch.IGloveMode/default
+    interface aidl vendor.lineage.touch.IHighTouchPollingRate/default
+    interface aidl vendor.lineage.touch.ITouchscreenGesture/default

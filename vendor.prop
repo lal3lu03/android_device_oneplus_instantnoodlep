@@ -6,3 +6,7 @@ vendor.usb.product_string=OnePlus 8 Pro
 
 # Verity
 ro.apk_verity.mode=2
+
+# Audio
+# Keep speaker protection enabled for normal amplifier bring-up.
+persist.vendor.audio.speaker.prot.enable=true
