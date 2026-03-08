@@ -1,6 +1,6 @@
 # Audio, Sensor & System Fix TODO
 **Device:** OnePlus 8 Pro (`instantnoodlep`, sm8250)  
-**Last updated:** 2026-03-08 (session 4 — Option A fix applied, audio_io_policy.conf fully cleaned, new SELinux .te files)  
+**Last updated:** 2026-03-08 (session 5 — audio confirmed working, full diagnostic pass)  
 **Branch:** `a16-bringup-fixes`
 
 > `✅ FIXED` = verified correct in the current tree (file read or ADB confirmed).  
@@ -25,12 +25,16 @@
 | 9 | SELinux | `vendor_hal_oplus_sensor_default.te` type + allow rule for `oplus_sensor_devinfo` | P1 | ✅ FIXED |
 | 10 | System | `lpm_levels.sleep_disabled=1` in kernel cmdline — CPU power states disabled | P1 | ✅ FIXED |
 | 11 | Audio | `vendor.audio.feature.spkr_prot.enable` set to `false` in `vendor.prop` — regression | **P0** | ✅ FIXED |
-| 12 | Audio | TFA9874 kernel DT missing `tfa_use_i2s` — both chips bind to PRIMARY I2S, HAL routes to TERT_MI2S → data never reaches amp | **P0** | 🔴 OPEN |
-| 13 | Audio | WSA DAPM route failures at boot — `SpkrLeft IN` / `SpkrRight IN` widgets missing from TFA DAPM graph | P1 | 🔴 OPEN |
-| 14 | Audio | `audio_io_policy.conf` dead 24-bit profiles — `#ifdef OPLUS_FEATURE_PLAYBACK_24BIT` treated as comment, app_type falls back to default | P2 | ✅ FIXED |
-| 15 | SELinux | `/dev/oplus_sensor_devinfo` unlabeled (`file_contexts` untracked) | P2 | 🟡 OPTIONAL |
-| 16 | Audio | `spkr_prot_start_processing` opens PCM device 25 (doesn't exist) — QCOM spkr_prot conflicts with TFA HAL | **P0** | 🟠 FIX APPLIED — needs device test |
+| 12 | Audio | TFA9874 kernel DT `tfa_use_i2s` absent at probe — DAI links registered correctly via `extend_codec_be_dailink`; audio plays; non-issue | **P0** | ✅ NON-ISSUE |
+| 13 | Audio | WSA DAPM route failures at boot — 4 unknown pins: `SpkrLeft IN`, `SpkrLeft SPKR`, `SpkrRight IN`, `SpkrRight SPKR` | P2 | 🟡 COSMETIC |
+| 14 | Audio | `audio_io_policy.conf` dead 24-bit profiles — all preprocessor guards removed | P2 | ✅ FIXED |
+| 15 | SELinux | `/dev/oplus_sensor_devinfo` unlabeled (`file_contexts` untracked) | P2 | ✅ FIXED |
+| 16 | Audio | QCOM `libspkrprot` opens PCM device 25 (missing) — blocked `enable_snd_device` | **P0** | ✅ FIXED (Option A: `spkr_prot.enable=false`, confirmed session 5) |
 | 17 | SELinux | `shell.te`, `tri-state-key-calibrate.te`, `vendor_qti_init_shell.te` untracked | P2 | ✅ FIXED |
+| 18 | Audio | `Audio Stream Capture 32 App Type Cfg` mixer ctrl missing — VI hostless app_type ctl not registered; ACDB still applies calibration | P3 | 🟡 COSMETIC |
+| 19 | Audio | `volume_listener: Failed to set gain dep cal level` → `out_write: retry` on each playback start | P3 | 🟡 COSMETIC |
+| 20 | Kernel | `oplus,dac-vendor` DT property absent in `oplus,audio-drv` node | P3 | 🟡 COSMETIC |
+| 21 | Kernel | `No DT match for tdm max slots` — falls back to default 8; correct for this device | P3 | 🟡 COSMETIC |
 
 ---
 
@@ -57,11 +61,18 @@ Live ADB check (`dumpsys sensorservice`) confirms **Total 56 h/w sensors, 56 run
 
 ---
 
-## AUDIO STATUS — 3 OPEN PROBLEMS (P0 root cause identified this session)
+## AUDIO STATUS — **SPEAKER WORKING** ✅ (session 5 confirmed)
 
-All config files confirmed deployed: `audio_policy_configuration.xml` loading from XML, `audio_io_policy.conf` 0× `#ifdef`, `audio_tuning_mixer.txt` present, `spkr_prot.enable=true`, `external_speaker*.enable=true`. TFA9874 probes OK on I2C 0x34+0x35. AudioFlinger writes signal. Speaker still silent.
+**Session 5 ADB verification:**
+- `tfa_dev_start success (0)` on both TFA9874 chips (I2C 0x34 + 0x35) ✅
+- Calibration values applied: 0x35 = 6023 mΩ, 0x34 = 6294 mΩ (both within 5000–8000 mΩ limit) ✅
+- `hw_params: Requested rate: 48000, sample size: 24, physical size: 32` — 24-bit 48kHz active ✅
+- `send_app_type_cfg PLAYBACK app_type 69936` — `deep_buffer_24` profile selected ✅
+- `enable_snd_device: snd_device(2: speaker)` + `snd_device(217: vi-feedback)` — correct path ✅
+- No `spkr_prot_start_processing` errors — P16 fix confirmed ✅
+- No SELinux AVC denials for audio ✅
 
-**Current P0 blocker (session 3 finding):** `spkr_prot_start_processing: cannot open device 25 for card 0: No such file or directory` — QCOM `libspkrprot` retries every ~5 seconds, `enable_snd_device` always returns error, speaker is never enabled. See Problem 16.
+Remaining issues are all cosmetic (P13, P18–P21) — they log at boot or on first write but do not prevent audio from playing.
 
 ---
 
@@ -75,37 +86,32 @@ All config files confirmed deployed: `audio_policy_configuration.xml` loading fr
 
 ---
 
-### PROBLEM 12 — TFA9874 kernel DT missing `tfa_use_i2s` → DAI bound to wrong I2S bus ⚠️ LIKELY ROOT CAUSE
+### PROBLEM 12 — TFA9874 DT `tfa_use_i2s` absent ✅ NON-ISSUE
 
-**Evidence:** Both TFA9874 probes log `no defined tfa_use_i2s, use primary i2s`  
-**Source:** `kernel/oneplus/sm8250` device tree, TFA9874 node
+**Original theory:** Missing DT property would cause TFA chips to bind to PRIMARY I2S while HAL routes TERT_MI2S → no audio.
 
-The `tfa98xx` driver reads a device-tree property (typically `oneplus,tfa_i2s_id` or `nxp,tfa_use_i2s`) to know which CPU-side MI2S bus it is wired to. Without the property, both chips default to "primary i2s" (MI2S instance 0).
+**Session 5 outcome:** Audio plays correctly. Investigation shows the `tfa_use_i2s` log message ("no defined tfa_use_i2s, use primary i2s") only appeared at the very first cold boot (January timestamps). On subsequent boots the `extend_codec_be_dailink` mechanism registers `tfa98xx-aif-2-34` and `tfa98xx-aif-2-35` DAI links correctly against TERT_MI2S regardless of the DT property. `tfa_dev_start success (0)` on both chips confirms the codec DAI is live on the correct bus.
 
-The audio HAL and mixer paths configure the speaker output on **TERT_MI2S_RX** (MI2S instance 2, confirmed in `mixer_paths.xml`: `TERT_MI2S_RX Audio Mixer MultiMedia5 = 1`). The codec DAI link in the machine driver must match.
-
-If the TFA9874 codec DAI registers itself under PRIMARY I2S but the ALSA backend configured by the HAL is TERT_MI2S, then:
-- The ALSA session opens on TERT_MI2S on the DSP side
-- The codec (TFA9874) is clocked/enabled on PRIMARY I2S
-- Audio data flows into TERT_MI2S but the TFA chip is listening on a different I2S bus
-- **No audio reaches the speaker**
-
-**Fix area:** Add the correct `tfa_use_i2s` or `oneplus,tfa_i2s_id` property to the TFA9874 I2C device tree nodes (`sound-tfa98xx` or equivalent in the board DTS for SM8250). The correct value is `2` (TERT MI2S).
+**No kernel DT change needed.**
 
 ---
 
-### PROBLEM 13 — WSA DAPM route failures at every boot
+### PROBLEM 13 — WSA DAPM route failures at boot 🟡 COSMETIC
 
-**Evidence:** `ASoC: no sink widget found for SpkrLeft IN` / `SpkrRight IN`  
-**Kernel log:**
+**Evidence (every boot):**
 ```
-kona-asoc-snd: ASoC: Failed to add route WSA_SPK1 OUT -> direct -> SpkrLeft IN
-kona-asoc-snd: ASoC: Failed to add route WSA_SPK2 OUT -> direct -> SpkrRight IN
+E tfa98xx 2-0035: ASoC: unknown pin SpkrRight IN
+E tfa98xx 2-0035: ASoC: unknown pin SpkrRight SPKR
+E tfa98xx 2-0034: ASoC: unknown pin SpkrLeft IN
+E tfa98xx 2-0034: ASoC: unknown pin SpkrLeft SPKR
+E bolero-codec: ASoC: unknown pin WSA AIF VI
 ```
 
-The kona machine driver registers DAI links and DAPM routes for WSA smart speaker (a QCOM-native amp found on Snapdragon reference designs). The OnePlus 8 Pro uses TFA9874 instead — TFA9874's DAPM output widget is named differently (e.g., `SPKL` / `SPKR` or `OUT`) and does not expose `SpkrLeft IN` / `SpkrRight IN`. These DAPM failures mean the kernel ALSA graph for the speaker path has unresolvable routes.
+The kona machine driver registers DAPM routes for WSA smart amplifier (QCOM-native amp on reference designs). OnePlus 8 Pro has TFA9874 — its DAPM outputs are named differently and don't expose `SpkrLeft IN`, `SpkrLeft SPKR`, `SpkrRight IN`, `SpkrRight SPKR`, or `WSA AIF VI`. These routes simply fail to connect at probe time.
 
-Depending on whether the kona machine driver uses the WSA routes as a required path to enable TERT_MI2S, this could prevent the TERT_MI2S backend PCM device from opening. Related to Problem 12 — if the DT correctly sets `tfa_use_i2s`, the machine driver may register TFA-appropriate widget names instead.
+**Session 5 confirmation:** Audio plays perfectly despite these errors. The TERT_MI2S backend PCM path does not require these WSA DAPM routes to be resolved. The kona machine driver falls back gracefully.
+
+**Not worth fixing** unless logspam becomes a specific issue (would require a kernel patch to guard WSA route registration behind a DT flag).
 
 ---
 
@@ -122,37 +128,65 @@ Remaining `#` lines are editorial comments only (file header, engineer change-ma
 
 ---
 
-### PROBLEM 16 — `spkr_prot_start_processing: cannot open device 25` � FIX APPLIED — needs device test
+### PROBLEM 16 — QCOM `libspkrprot` opens PCM device 25 (missing) ✅ CONFIRMED FIXED (session 5)
 
-**Source:** ADB logcat session 3 (repeating every ~5 s):
-```
-E audio_hw_spkr_prot: spkr_prot_start_processing: spkr snd_device(95: speaker-protected)
-E audio_hw_spkr_prot: spkr_prot_start_processing: cannot open device 25 for card 0: No such file or directory
-E audio_hw_primary: enable_snd_device: spkr_start_processing failed
-```
+**Root cause (session 3):** With `spkr_prot.enable=true`, QCOM `libspkrprot` tried to open `pcmC0D25c` (hardcoded default, doesn't exist on this kernel). This blocked `enable_snd_device` → complete silence.
 
-**Effect:** `enable_snd_device()` always returns error → speaker is never enabled → complete silence.
+**Fix (session 4):** `vendor.audio.feature.spkr_prot.enable=false` in `sm8250-common/vendor.prop` — QCOM `libspkrprot` disabled; TFA HAL handles speaker protection via `pcm_dev_tx_id=32`.
 
-**Root cause:** Two speaker-protection stacks run simultaneously:
-- `libspkrprot.so` (QCOM) — hardcoded default opens `pcmC0D25c`; that device does **not exist** (ALSA gap: D23 → D29). XML override to D32 not applied at runtime.
-- `audio_amplifier.kona.so` (TFA HAL) — already maps to `pcm_dev_tx_id = 32` (`pcmC0D32c` **exists**) ✅
+**Session 5 ADB confirmation:**
+- No `spkr_prot_start_processing` errors in logcat ✅
+- `enable_snd_device: snd_device(2: speaker)` succeeds ✅
+- `tfa_dev_start success (0)` both chips ✅
+- Audio heard from speaker ✅
 
-QCOM `libspkrprot` intercepts `enable_snd_device` before TFA HAL runs, causing abort.
+**Prop disambiguation:**
 
-**Fix applied (session 4):** Option A — `vendor.audio.feature.spkr_prot.enable=false` in `sm8250-common/vendor.prop`  
-→ disables QCOM `libspkrprot` loading, removing the PCM-25 failure entirely.  
-→ TFA HAL (`audio_amplifier.kona.so`) handles speaker protection exclusively via PCM D32.
+| Property | Value | Purpose |
+|----------|-------|---------|
+| `vendor.audio.feature.spkr_prot.enable` | `false` | QCOM `libspkrprot` gate — **must be false** on TFA devices |
+| `persist.vendor.audio.speaker.prot.enable` | `true` | TFA HAL calibration data flag — **must be true** |
 
-#### ⚠️ Prop name table — two different properties, no conflict
+---
 
-| Property | Set where | Value | Purpose |
-|----------|-----------|-------|---------|
-| `vendor.audio.feature.spkr_prot.enable` | `sm8250-common/vendor.prop` | **`false`** | Controls whether QCOM `libspkrprot.so` loads during `adev_open`. **Must be false** to avoid PCM-25 failure. |
-| `persist.vendor.audio.speaker.prot.enable` | `bringup.rc` + `migration.rc` | **`true`** | Tells TFA HAL to apply saved calibration data. **Must be true** for correct TFA amplitude. |
+### PROBLEM 18 — `Audio Stream Capture 32 App Type Cfg` mixer control missing 🟡 COSMETIC
 
-These are unrelated props controlling different subsystems. The comment in `bringup.rc` ("Enable QCOM speaker protection") is **misleading** — it actually sets the TFA persist prop. No action needed on the value; optionally fix the comment.
+**Evidence:** `E audio_hw_utils: send_app_type_cfg_for_device: Could not get ctl for mixer cmd - Audio Stream Capture 32 App Type Cfg`
 
-**Needs:** flash next build and verify `spkr_prot_start_processing` error is gone from logcat, and audio plays.
+The HAL tries to set `app_type` on PCM device 32 (VI-hostless hostless capture, `in_snd_device vi-feedback`). The corresponding ALSA mixer control `Audio Stream Capture 32 App Type Cfg` is not registered by this kernel. The HAL logs an error but continues; ACDB calibration (acdb_id=102, app_type=69938) is still loaded via a separate path.
+
+**Impact:** None. Speaker audio plays correctly. ACDB is applied.
+
+---
+
+### PROBLEM 19 — `volume_listener: Failed to set gain dep cal level` 🟡 COSMETIC
+
+**Evidence:** `E volume_listener: check_and_set_gain_dep_cal: Failed to set gain dep cal level`  
+Followed by: `D audio_hw_primary: out_write: retry previous failed cal level set` on first write
+
+The `volume_listener` extension tries to set gain-dependent calibration level via a mixer control that doesn’t exist for the VI-feedback hostless path. The HAL retries once on the next `out_write`, which succeeds. No audible effect.
+
+**Impact:** One extra `out_write` retry per playback session start. Cosmetic log noise.
+
+---
+
+### PROBLEM 20 — `oplus,dac-vendor` DT property absent 🟡 COSMETIC
+
+**Evidence:** `W extend_codec_prop_parse: Looking up 'oplus,dac-vendor' property in node oplus,audio-drv failed`
+
+The OPlus audio driver DT node `oplus,audio-drv` is missing the optional `oplus,dac-vendor` property. The driver uses it to detect a dedicated external DAC. OnePlus 8 Pro has no such DAC chip; the Snapdragon internal WCD940x is used. Driver falls back to default.
+
+**Impact:** None. Internal codec path works correctly.
+
+---
+
+### PROBLEM 21 — `No DT match for tdm max slots` 🟡 COSMETIC
+
+**Evidence:** `E kona-asoc-snd: msm_asoc_machine_probe: No DT match for tdm max slots` → `Using default tdm max slot: 8`
+
+The kona machine driver probes for a DT property specifying TDM max slots for this board. The OnePlus 8 Pro DT doesn’t set it; the driver defaults to 8 which is correct for the TERT_MI2S 8-slot TDM configuration in use.
+
+**Impact:** None.
 
 ---
 
@@ -166,46 +200,27 @@ All types working: lsm6dsm (accel+gyro), mmc5603x (mag), tcs3701 (ALS), stk2232 
 
 ## REMAINING ITEMS
 
-### System — `lpm_levels.sleep_disabled=1` ✅ FIXED in this session (`BoardConfigCommon.mk`)
-
-Removed. Will require `boot.img` rebuild when kernel is rebuilt for Problem 12 DT fix.
+All P0 audio blockers resolved. Remaining items are cosmetic kernel/DT issues (P13, P18–P21).
 
 ---
 
 ## NEXT BUILD STEPS
 
-### Step 1 — Flash and verify P16 fix (Option A applied in source)
+All P0 blockers are resolved and confirmed on device (session 5). No mandatory build steps remain.
 
-Option A (`vendor.audio.feature.spkr_prot.enable=false`) is now set in `sm8250-common/vendor.prop`. Build and flash `vendor` partition, then:
-```bash
-# Confirm prop landed
-adb shell getprop vendor.audio.feature.spkr_prot.enable   # expect: false
-# Confirm no PCM-25 error
-adb logcat | grep spkr_prot_start_processing
-# Play audio — speaker should now produce sound
-```
-If audio plays → Problem 16 **CONFIRMED FIXED**. If still silent, check logcat for new error.
-
-### Step 2 — Identify PCM device 32 name (requires root / eng build)
-```bash
-adb shell cat /proc/asound/pcm | grep "32:"
-# expected: "00-32: Tertiary MI2S TX Hostless Capture ..."
-# if name differs, update SPK_VI_HOSTLESS in audio_platform_info_intcodec.xml
-```
-
-### Step 3 — Kernel DT fix for Problems 12 & 13 (requires boot.img rebuild)
-- Find TFA9874 DTS node in `kernel/oneplus/sm8250`
-- Add `oneplus,tfa_i2s_id = <2>` (or equivalent property name from `tfa98xx.c`)
-- Rebuild `bootimage` and flash `boot_b`
-- Recheck WSA DAPM route errors (Problem 13 may resolve with correct DT binding)
-
-### Step 4 — git add new untracked files
+### Optional — commit current working state
 ```bash
 cd /home/lal3lu/android/pixelos/device/oneplus/instantnoodlep
-git add sepolicy/vendor/shell.te sepolicy/vendor/tri-state-key-calibrate.te sepolicy/vendor/vendor_qti_init_shell.te
-git add init/sensor_recover.sh init/zz_audio_prop_migration.rc
-git add TODO.md
+git add TODO.md && git commit --amend --no-edit
+
+cd /home/lal3lu/android/pixelos/device/oneplus/sm8250-common
+git add -u && git commit --amend --no-edit
 ```
+
+### If cosmetic kernel logspam (P13, P21) becomes a problem
+- Add a DT property to guard WSA DAPM route registration in the kona machine driver
+- Add `qcom,tdm-max-slots = <8>` to the sound DT node (eliminates the default warning)
+- These require a `kernel/oneplus/sm8250` change + boot.img rebuild
 
 ---
 
@@ -229,4 +244,8 @@ git add TODO.md
 | All 56 sensors running | ADB: `Total 56 h/w sensors, 56 running` ✅ |
 | PCM device 32 (`pcmC0D32c`) exists in ALSA card | ADB: `ls /dev/snd/` ✅ |
 | PCM devices 24–28 absent from ALSA card (D23 → D29 gap) | ADB: `ls /dev/snd/ \| sort -t D -k2 -n` confirms D24–D28 missing ✅ |
+| TFA9874 calibration applied: L=6294 mΩ (0x34), R=6023 mΩ (0x35) — within 5000–8000 mΩ | ADB logcat session 5: `tfa_dev_start success (0)` on both chips ✅ |
+| 24-bit deep_buffer_24 (app_type 69936) active at 48 kHz | ADB logcat session 5: `Allowing 24 and above bits playback on speaker` ✅ |
+| Speaker produces audible output | Confirmed live by user — session 5 ✅ |
+| No `spkr_prot_start_processing` errors | ADB logcat session 5: zero occurrences ✅ |
 
