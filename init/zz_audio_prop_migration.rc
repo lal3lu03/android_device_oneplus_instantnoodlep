@@ -1,0 +1,2 @@
+on post-fs-data
+    setprop persist.vendor.audio.speaker.prot.enable true

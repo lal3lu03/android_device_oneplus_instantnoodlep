@@ -1,0 +1,4 @@
+/vendor/bin/hw/vendor\.lineage\.livedisplay-service\.oplus  u:object_r:hal_lineage_livedisplay_qti_exec:s0
+/vendor/bin/hw/vendor\.lineage\.touch-service\.oplus        u:object_r:hal_lineage_touch_default_exec:s0
+/odm/bin/sensor_recover\.sh        u:object_r:vendor_shell_exec:s0
+/dev/oplus_sensor_devinfo          u:object_r:oplus_sensor_devinfo_device:s0

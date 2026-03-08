@@ -1,0 +1,2 @@
+# Allow shell to read vendor audio properties for debugging
+get_prop(shell, vendor_audio_prop)

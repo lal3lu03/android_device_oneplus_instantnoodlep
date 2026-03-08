@@ -1,0 +1,6 @@
+# Allow alert-slider calibration to traverse the engineer persist directory.
+r_dir_file(tri-state-key-calibrate, vendor_persist_engineer_file)
+
+# Allow calibration binary to read tri-state proc node during mode updates.
+r_dir_file(tri-state-key-calibrate, vendor_proc_tri_state_key)
+allow tri-state-key-calibrate vendor_proc_tri_state_key:file rw_file_perms;
