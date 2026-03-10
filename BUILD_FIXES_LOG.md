@@ -4485,3 +4485,234 @@ Temporary bringup flags disabled Touch/LiveDisplay features to avoid boot-time s
 - Remaining untracked local artifacts:
   - `build.log`
   - `out/` (local directory under this repo path)
+
+---
+
+## Session 10: Audio, Sensor & System Bring-up Fixes (March 8, 2026)
+
+### 181. Deployment of Missing Bring-up RC and Sensor Recovery Script
+**Files Modified:** `device/oneplus/instantnoodlep/device.mk`, `device/oneplus/instantnoodlep/init/init.instantnoodlep-bringup.rc`
+
+**Issue:** Critical boot-time orchestration files were present in the tree but not being copied to the device images.
+- `init.instantnoodlep-bringup.rc`: Starts touch-hal, fingerprint services, and triggers sensor recovery.
+- `sensor_recover.sh`: Bootstraps the SSC persist sensor registry.
+- Missing `exec_background` call in the RC file meant the recovery script never executed.
+
+**Fix Applied:**
+- Added both files to `PRODUCT_COPY_FILES` in `device.mk`.
+- Added `exec_background u:r:vendor_shell:s0 -- /odm/bin/sensor_recover.sh` to `init.instantnoodlep-bringup.rc`.
+- Added `zz_vendor.touch-hal.override.rc` and `zz_audio_prop_migration.rc` to `PRODUCT_COPY_FILES`.
+
+**Impact:** Restores touch polling rate/glove mode support, fingerprint HAL startup, and essential sensor registry bootstrapping.
+
+---
+
+### 182. Re-enabling OPlus Sensor Kernel Driver (oplus_sensor_devinfo)
+**Files Modified:** `kernel/oneplus/sm8250/arch/arm64/configs/vendor/oplus.config`, `kernel/oneplus/sm8250/drivers/soc/oplus/sensor/Makefile`
+
+**Issue:** The `sensors.oplus.so` HAL was failing to initialize because the `/dev/oplus_sensor_devinfo` node was missing. The kernel driver was disabled in the configuration and commented out in the Makefile.
+
+**Fix Applied:**
+- Added `CONFIG_OPLUS_SENSOR_DEVINFO=y` and `CONFIG_OPLUS_FEATURE_SENSOR_CFG=y` to `oplus.config`.
+- Uncommented the compilation lines for `oplus_sensor_devinfo.o` and related objects in the sensor Makefile.
+
+**Impact:** Re-enables motion sensors (Accelerometer/Gyroscope) which rely on this driver for device information.
+
+---
+
+### 183. SELinux Policy for OPlus Sensor Device Node
+**Files Modified:** `device/oneplus/instantnoodlep/sepolicy/vendor/file_contexts`, `device/oneplus/instantnoodlep/sepolicy/vendor/vendor_hal_oplus_sensor_default.te`
+
+**Issue:** Once the driver was enabled, the HAL was blocked by SELinux from accessing the new `/dev/oplus_sensor_devinfo` node.
+
+**Fix Applied:**
+- Labeled `/dev/oplus_sensor_devinfo` as `oplus_sensor_devinfo_device` in `file_contexts`.
+- Added type declaration and `allow` rule for `vendor_hal_oplus_sensor_default` to access the node in `vendor_hal_oplus_sensor_default.te`.
+
+**Impact:** Resolves AVC denials, allowing 56 system/motion sensors to go live.
+
+---
+
+### 184. Fixing Audio Configuration Deployment (Makefile Comment Bug)
+**File Modified:** `device/oneplus/sm8250-common/common.mk`
+
+**Issue:** A broken comment (`#`) on a `PRODUCT_COPY_FILES` line terminated the Makefile line continuation (`\`), causing several critical audio configuration files to be silently omitted from the vendor image.
+- `audio_policy_configuration.xml`, `audio_io_policy.conf`, and `audio_tuning_mixer.txt` were missing.
+
+**Fix Applied:** Removed the broken comment and ensured proper line continuations.
+
+**Impact:** Restores correct audio policy routing, HIDL profiles, and ALSA tuning overrides.
+
+---
+
+### 185. Disabling QCOM Speaker Protection to Resolve Conflict with TFA
+**Files Modified:** `device/oneplus/sm8250-common/vendor.prop`, `device/oneplus/instantnoodlep/init/init.instantnoodlep-bringup.rc`, `device/oneplus/instantnoodlep/init/zz_audio_prop_migration.rc`
+
+**Issue:** QCOM's native `libspkrprot.so` was attempting to open PCM device 25 (which doesn't exist on this kernel), causing `enable_snd_device` to fail and blocking the TFA amplifier startup sequence.
+
+**Fix Applied:**
+- Set `vendor.audio.feature.spkr_prot.enable=false` in `vendor.prop` to prevent the QCOM stack from loading.
+- Set `persist.vendor.audio.speaker.prot.enable=true` in `init.rc` files to signal the TFA HAL to apply its own calibration data.
+
+**Impact:** Removes the P0 audio blocker, allowing the TFA feedback loop to initialize without interference.
+
+---
+
+### 186. Correcting Hardcoded PCM Device IDs for Audio HAL
+**Files Modified:** `hardware/oplus/audio_amplifier/audio_amplifier.c`, `hardware/qcom-caf/sm8250/audio/hal/msm8974/platform.h`
+
+**Issue:** The QCOM HAL's internal parser was ignoring XML overrides for certain usecases, defaulting to nonexistent PCM devices (25 and 15).
+
+**Fix Applied:**
+- Hardcoded `SPKR_PROT_CALIB_TX_PCM_DEVICE` to `32` in `platform.h`.
+- Hardcoded `LOWLATENCY_PCM_DEVICE` to `9` in `platform.h`.
+- Forced the TFA HAL to use device `32` for calibration in `audio_amplifier.c`.
+
+**Impact:** Ensures the HAL opens the correct ALSA nodes for playback and TFA feedback.
+
+---
+
+### 187. Kernel Device Tree Fixes for TFA9874
+**File Modified:** `kernel/oneplus/sm8250/arch/arm64/boot/dts/vendor/oplus/instantnoodlep/kona-audio-overlay.dtsi`
+
+**Issue:** Multiple DT-level issues were preventing the amplifiers from receiving data and registering correctly.
+- Missing `tfa_use_i2s` caused chips to bind to the wrong bus.
+- Incorrect registration as SoundWire devices instead of I2C auxiliary devices.
+- Failing legacy WSA DAPM routes causing boot-time logspam.
+
+**Fix Applied:**
+- Added `tfa_use_i2s = <2>;` and `oneplus,tfa_i2s_id = <2>;` to TFA nodes.
+- Labeled TFA nodes and registered them as `qcom,wsa-devs` with `qcom,wsa-max-devs = <2>`.
+- Added `SpkrLeft` / `SpkrRight` prefixes to match machine driver expectations.
+- Removed obsolete WSA DAPM routes.
+- Added cosmetic properties `qcom,tdm-max-slots = <8>` and `oplus,dac-vendor = "none"` to clear boot warnings.
+
+**Impact:** Correctly binds hardware to the Tertiary MI2S bus and enables proper widget discovery in the ASoC core.
+
+---
+
+### 188. Fixing Kona Machine Driver DAPM and Probe Issues
+**File Modified:** `kernel/oneplus/sm8250/techpack/audio/asoc/kona.c`, `kernel/oneplus/sm8250/techpack/audio/asoc/codecs/msm-cdc-pinctrl.c`
+
+**Issue:**
+- A race condition between ADSP and the machine driver caused pinctrl probe failures ("platform device not found!").
+- DAPM widget name mismatch prevented `ignore_suspend` from working for TFA.
+- Direct calls to WSA functions on TFA components caused kernel crashes.
+
+**Fix Applied:**
+- Implemented `EPROBE_DEFER` handling for pinctrl lookups in the machine driver and `msm-cdc-pinctrl.c`.
+- Updated `ignore_suspend` to use base widget names (`AIF IN`, `OUTL`) as the context is already component-prefixed.
+- Patched `msm_wsa881x_init` to strictly skip WSA channel mapping and codec entry creation for TFA amplifiers.
+
+**Impact:** Resolves kernel crashes and ensuring TERT_MI2S pins are correctly configured before audio playback starts.
+
+---
+
+### 189. Enabling Audio-Extend Techpack for TFA Support
+**File Modified:** `kernel/oneplus/sm8250/techpack/audio-extend/Kbuild`
+
+**Issue:** The `audio-extend` techpack, which contains critical OPlus DAI link patches for TFA amplifiers, was present in the tree but excluded from the build.
+
+**Fix Applied:** Enabled `obj-y += audio_extend_dlkm.o` in the techpack Kbuild.
+
+**Impact:** Dynamically patches the Kona machine driver to support the dual-TFA amplifier configuration on Tertiary MI2S.
+
+---
+
+### 190. System Stability: Restoring CPU Low-Power States (LPM)
+**File Modified:** `device/oneplus/sm8250-common/BoardConfigCommon.mk`
+
+**Issue:** The debug flag `lpm_levels.sleep_disabled=1` was present in the kernel command line, permanently disabling CPU deep sleep.
+
+**Fix Applied:** Removed the flag from `BOARD_KERNEL_CMDLINE`.
+
+**Impact:** Restores normal idle power consumption and prevents thermal-induced ADSP throttling, improving battery life and audio stability.
+
+---
+
+### 191. Call Earpiece Routing: Added Prefixed TFA Mixer Control Fallback
+**Date:** March 9, 2026  
+**Files Modified:** `device/oneplus/instantnoodlep/audio/mixer_paths.xml`
+
+**Issue:** In-call handset mode still played through bottom speaker. Kernel logs repeatedly showed:
+- `tfa98xx ... selector:0 chip_selected:1`
+- mixed amp profiles (`2-0035: speaker`, `2-0034: receiver`)
+
+This indicated route transitions (`voice-handset` / `voice-speaker-stereo`) were happening, but `TFA_CHIP_SELECTOR` writes from mixer paths were not taking effect.
+
+**Root-cause hypothesis:** DTS now uses `qcom,wsa-aux-dev-prefix = "SpkrLeft", "SpkrRight"`, so relevant kcontrols may be exposed with prefixes while mixer paths were still writing only legacy unprefixed names.
+
+**Fix Applied:**
+- Added fallback writes for both prefixed and unprefixed control names in key paths:
+  - startup default selector block
+  - `speaker`, `speaker-mono`
+  - `handset`
+  - `mmi-mic-seal-receiver`, `mmi-speaker-right`, `mmi-speaker-left`
+- Handset now explicitly forces selector `1` while keeping legacy names for compatibility.
+
+**Build Status:**
+- Rebuilt `vendorimage` successfully.
+- Artifact: `out/target/product/instantnoodlep/vendor.img` (2026-03-09 17:24 CET).
+
+**Pending Validation:**
+- Flash `vendor_b` and capture a fresh 30–45s call repro.
+- Confirm kernel logs show non-zero selector in handset mode and user hears call audio from top earpiece.
+
+---
+
+### 192. Call Audio Validation Complete (Earpiece + Mic Working)
+**Date:** March 10, 2026  
+**Validation Artifacts:**
+- `device/oneplus/instantnoodlep/logs/call_post_vendorflash_2026-03-10_115629_all_45s.txt`
+- `device/oneplus/instantnoodlep/logs/call_post_vendorflash_2026-03-10_115629_kernel_45s.txt`
+
+**Flash Performed:**
+- `vendor_b` flashed from `out/target/product/instantnoodlep/vendor.img` (slot `b` workflow via fastbootd).
+
+**Observed in kernel log:**
+- `tfa98xx_set_stereo_ctl: selector = 1` in handset route.
+- `tfa98xx_set_stereo_ctl: selector = 3` in speaker route.
+- In handset mode:
+  - `2-0035: selector:1 chip_selected:0` (bottom amp deselected)
+  - `2-0034: selector:1 chip_selected:1` + `tfa_dev_start success` (receiver/top path active)
+
+**Observed in audio HAL log:**
+- Route changes correctly between:
+  - `(25: voice-handset)` and
+  - `(27: voice-speaker-stereo)`
+- No recurrence of `cannot open device 44`; `voice_start_usecase: exit: status(0)` remains.
+
+**User Confirmation:**
+- Earpiece works after latest flash.
+- In-call mic remains working.
+
+**Result:** P23/P24/P25 are effectively resolved; focus can move to P22 (UDFPS HBM handshake).
+
+---
+
+### 193. Fingerprint Setup Visibility Regression and Recovery
+**Date:** March 10, 2026  
+**Files/areas involved:** `init.instantnoodlep-bringup.rc`, `zz_fps_hal_override.rc`, `vendor.img`, `odm.img`
+
+**Issue:** During fingerprint service experiments, disabling legacy `fps_hal` removed the fingerprint setup path in Settings (enrollment option disappeared).
+
+**Root Cause:** The AOSP/PixelOS fingerprint wrapper path still depends on the ODM backend service topology on this device. Disabling `fps_hal` prevented the expected provider chain from being exposed consistently to Settings.
+
+**Recovery Applied:**
+- Restored startup of both services in bringup init:
+  - `start fps_hal`
+  - `start vendor.fps_hal_oplus`
+- Restored fingerprint interface declarations in `zz_fps_hal_override.rc`.
+- Rebuilt and reflashed:
+  - `vendor_b` from `out/target/product/instantnoodlep/vendor.img`
+  - `odm_b` from `out/target/product/instantnoodlep/odm.img`
+
+**Post-flash verification (ADB):**
+- Fingerprint feature/service present:
+  - `feature:android.hardware.fingerprint`
+  - `fingerprint: [android.hardware.fingerprint.IFingerprintService]`
+- Fingerprint settings activity launches:
+  - `adb shell am start -W -a android.settings.FINGERPRINT_SETTINGS` -> `Status: ok`
+- `dumpsys fingerprint` shows active `FingerprintProvider/defaultHIDL`, no HAL deaths.
+
+**Result:** Fingerprint setup path is restored; next debugging focus remains P22 (UDFPS enrollment/runtime handshake).

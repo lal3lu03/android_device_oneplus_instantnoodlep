@@ -11,6 +11,7 @@ PRODUCT_AAPT_PREF_CONFIG := xxxhdpi
 # Audio
 PRODUCT_COPY_FILES += \
     $(LOCAL_PATH)/audio/audio_platform_info_intcodec.xml:$(TARGET_COPY_OUT_VENDOR)/etc/audio_platform_info_intcodec.xml \
+    $(LOCAL_PATH)/audio/audio_platform_info_intcodec.xml:$(TARGET_COPY_OUT_VENDOR)/etc/audio_platform_info.xml \
     $(LOCAL_PATH)/audio/mixer_paths.xml:$(TARGET_COPY_OUT_VENDOR)/etc/mixer_paths.xml \
     $(LOCAL_PATH)/audio/sound_trigger_mixer_paths.xml:$(TARGET_COPY_OUT_ODM)/etc/sound_trigger_mixer_paths.xml \
     $(LOCAL_PATH)/audio/sound_trigger_platform_info.xml:$(TARGET_COPY_OUT_ODM)/etc/sound_trigger_platform_info.xml
@@ -31,7 +32,11 @@ PRODUCT_PACKAGES += \
 PRODUCT_COPY_FILES += \
     $(LOCAL_PATH)/init/zz_fps_hal_override.rc:$(TARGET_COPY_OUT_ODM)/etc/init/zz_fps_hal_override.rc \
     $(LOCAL_PATH)/init/zz_vl53l1_daemon_override.rc:$(TARGET_COPY_OUT_ODM)/etc/init/zz_vl53l1_daemon_override.rc \
-    $(LOCAL_PATH)/init/zz_vendor.aidl_hal_overrides.rc:$(TARGET_COPY_OUT_VENDOR)/etc/init/zz_vendor.aidl_hal_overrides.rc
+    $(LOCAL_PATH)/init/zz_vendor.aidl_hal_overrides.rc:$(TARGET_COPY_OUT_VENDOR)/etc/init/zz_vendor.aidl_hal_overrides.rc \
+    $(LOCAL_PATH)/init/init.instantnoodlep-bringup.rc:$(TARGET_COPY_OUT_VENDOR)/etc/init/init.instantnoodlep-bringup.rc \
+    $(LOCAL_PATH)/init/sensor_recover.sh:$(TARGET_COPY_OUT_ODM)/bin/sensor_recover.sh \
+    $(LOCAL_PATH)/init/zz_vendor.touch-hal.override.rc:$(TARGET_COPY_OUT_ODM)/etc/init/zz_vendor.touch-hal.override.rc \
+    $(LOCAL_PATH)/init/zz_audio_prop_migration.rc:$(TARGET_COPY_OUT_VENDOR)/etc/init/zz_audio_prop_migration.rc \
 
 # Display
 PRODUCT_COPY_FILES += \

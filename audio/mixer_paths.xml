@@ -660,6 +660,9 @@
     <ctl name="stereo Profile" value="speaker" />
     <ctl name="TERT_MI2S_RX_VI_FB_MUX" value="ZERO" />
     <!-- nxp SPK left:1 right:2 stereo:3 -->
+    <!-- Support both prefixed and legacy unprefixed TFA selector controls. -->
+    <ctl name="SpkrLeft TFA_CHIP_SELECTOR" value="3" />
+    <ctl name="SpkrRight TFA_CHIP_SELECTOR" value="3" />
     <ctl name="TFA_CHIP_SELECTOR" value="3" />
     <ctl name="TERT_MI2S_RX Format" value="S24_LE" />
     <ctl name="TERT_MI2S_TX Format" value="S24_LE" />
@@ -2608,12 +2611,21 @@
     </path>
 
     <path name="speaker">
+        <!-- Newer DTS registers TFA controls with SpkrLeft/SpkrRight prefixes. -->
+        <ctl name="SpkrLeft TFA_CHIP_SELECTOR" value="3" />
+        <ctl name="SpkrRight TFA_CHIP_SELECTOR" value="3" />
         <ctl name="TFA_CHIP_SELECTOR" value="3" />
+        <ctl name="SpkrLeft stereo Profile" value="speaker" />
+        <ctl name="SpkrRight stereo Profile" value="speaker" />
         <ctl name="stereo Profile" value="speaker" />
     </path>
 
     <path name="speaker-mono">
+        <ctl name="SpkrLeft TFA_CHIP_SELECTOR" value="2" />
+        <ctl name="SpkrRight TFA_CHIP_SELECTOR" value="2" />
         <ctl name="TFA_CHIP_SELECTOR" value="2" />
+        <ctl name="SpkrLeft stereo Profile" value="speaker" />
+        <ctl name="SpkrRight stereo Profile" value="speaker" />
         <ctl name="stereo Profile" value="speaker" />
     </path>
 
@@ -2755,7 +2767,12 @@
     </path>
 
     <path name="handset">
+        <!-- Force receiver path to the top amp and keep compatibility with legacy names. -->
+        <ctl name="SpkrLeft TFA_CHIP_SELECTOR" value="1" />
+        <ctl name="SpkrRight TFA_CHIP_SELECTOR" value="1" />
         <ctl name="TFA_CHIP_SELECTOR" value="1" />
+        <ctl name="SpkrLeft stereo Profile" value="receiver" />
+        <ctl name="SpkrRight stereo Profile" value="receiver" />
         <ctl name="stereo Profile" value="receiver" />
     </path>
 
@@ -4272,17 +4289,29 @@
     </path>
 
     <path name="mmi-mic-seal-receiver">
+        <ctl name="SpkrLeft TFA_CHIP_SELECTOR" value="1" />
+        <ctl name="SpkrRight TFA_CHIP_SELECTOR" value="1" />
         <ctl name="TFA_CHIP_SELECTOR" value="1" />
+        <ctl name="SpkrLeft stereo Profile" value="speaker" />
+        <ctl name="SpkrRight stereo Profile" value="speaker" />
         <ctl name="stereo Profile" value="speaker" />
     </path>
 
     <path name="mmi-speaker-right">
+        <ctl name="SpkrLeft TFA_CHIP_SELECTOR" value="2" />
+        <ctl name="SpkrRight TFA_CHIP_SELECTOR" value="2" />
         <ctl name="TFA_CHIP_SELECTOR" value="2" />
+        <ctl name="SpkrLeft stereo Profile" value="speaker" />
+        <ctl name="SpkrRight stereo Profile" value="speaker" />
         <ctl name="stereo Profile" value="speaker" />
     </path>
 
     <path name="mmi-speaker-left">
+        <ctl name="SpkrLeft TFA_CHIP_SELECTOR" value="1" />
+        <ctl name="SpkrRight TFA_CHIP_SELECTOR" value="1" />
         <ctl name="TFA_CHIP_SELECTOR" value="1" />
+        <ctl name="SpkrLeft stereo Profile" value="speaker" />
+        <ctl name="SpkrRight stereo Profile" value="speaker" />
         <ctl name="stereo Profile" value="speaker" />
     </path>
 
