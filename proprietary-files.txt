@@ -139,3 +139,4 @@ odm/etc/sensor/config/kona_stk3a6x_0.json
 
 # WiFi
 odm/etc/wifi/bdwlan.elf
+vendor/firmware/qca6390/regdb.bin

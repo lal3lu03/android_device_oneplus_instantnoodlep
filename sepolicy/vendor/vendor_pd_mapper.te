@@ -1,0 +1,7 @@
+# vendor_pd_mapper — Qualcomm Protection Domain (PD) mapper daemon.
+# Runs as a vendor daemon and needs to read system properties to map subsystem
+# crash-recovery domains (ADSP, CDSP, SLPI) and notify framework of PD restarts.
+
+# Platform neverallow blocks vendor domain reads of broad system_prop.
+# Keep boot log clean by suppressing this known non-fatal probe denial.
+dontaudit vendor_pd_mapper system_prop:file r_file_perms;

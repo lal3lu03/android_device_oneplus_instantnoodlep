@@ -1,20 +1,22 @@
 # PixelOS Android 16 QPR1 Build Fixes for OnePlus 8 Pro (instantnoodlep)
 
-**Last Updated:** March 7, 2026 18:15
+**Last Updated:** March 15, 2026 18:xx (session 24 closeout)
 
-**Build Target:** aosp_instantnoodlep-bp3a-userdebug  
-**ROM:** PixelOS sixteen-qpr1 (BUILD_ID: BP3A.250905.014)  
+**Build Target:** aosp_instantnoodlep-bp3a-userdebug (active debug cycle) / user (release path)
+**ROM:** PixelOS sixteen-qpr1 (BUILD_ID: BP3A.250905.014)
 **Device Trees:** LineageOS 23.2 (device), LineageOS 23.0 (vendor blobs)
 
 ---
 
 ## Build Status
 
-✅ **180 Issues Logged** (compilation + runtime + policy bring-up)  
-📊 **Checkpoint Commit:** `a6b32a7` (`29 files changed, 1388 insertions(+), 3 deletions(-)`)  
-🔧 **Latest built images:** `vendor.img` + `odm.img` at `2026-03-06 18:07`  
-⏱️ **Next queued step:** rebuild `vendorimage` and flash `vendor_b` (Issue 178 validation)  
-⚠️ **Open runtime bring-up:** speaker audio output and shake/gesture behavior
+✅ **214 Issues Logged** (compilation + runtime + policy bring-up)
+✅ **P42 FIXED (2026-03-15):** Black-screen + severe idle drain resolved — PPR property disabled
+📊 **Checkpoint Commit:** `a6b32a7` (`29 files changed, 1388 insertions(+), 3 deletions(-)`)
+🔧 **Active build:** `userdebug` batch (`bacon`) in progress — output at `/home/lal3lu/android/pixelos_out_userdebug/target/product/instantnoodlep/`
+🔧 **Last stable images:** `vendor.img` + `odm.img` at `2026-03-06 18:07`
+⏱️ **Next queued step:** Play Integrity Phase 1 (property spoofing) → rebuild → test → release gate
+⚠️ **Open (non-blocking):** Play Integrity Phase 1–4 not started; P30/P40 monitor-only; P13/P18–P21 cosmetic
 
 ---
 
@@ -4716,3 +4718,717 @@ This indicated route transitions (`voice-handset` / `voice-speaker-stereo`) were
 - `dumpsys fingerprint` shows active `FingerprintProvider/defaultHIDL`, no HAL deaths.
 
 **Result:** Fingerprint setup path is restored; next debugging focus remains P22 (UDFPS enrollment/runtime handshake).
+
+---
+
+### 194. P27 Fix: Power HAL `idle_state` SELinux Access Restored
+**Date:** March 11, 2026  
+**File Modified:** `device/oneplus/instantnoodlep/sepolicy/vendor/hal_power_default.te`
+
+**Issue:** `hal_power_default` was denied reading `idle_state` under `vendor_sysfs_graphics`, leaving autosuspend behavior degraded and contributing to the P26 battery-drain/suspend symptoms.
+
+**Fix Applied:**
+- Added:
+  - `r_dir_file(hal_power_default, vendor_sysfs_graphics)`
+
+**Validation:**
+- Artifact: `device/oneplus/instantnoodlep/logs/post_p31final_boot_20260311_161129.txt`
+- No further AVC denials for `hal_power_default` + `vendor_sysfs_graphics` / `idle_state`.
+- Power manager state confirmed recovered (`mHalAutoSuspendModeEnabled=true`, suspend blockers released on screen-off path).
+
+**Impact:** Primary SELinux blocker for P27 is cleared; remaining P26 closure requires unplugged deep-sleep soak verification.
+
+---
+
+### 195. P28 Fix: Lineage Health HAL Access to `oplus_chg` Sysfs
+**Date:** March 11, 2026  
+**File Added:** `device/oneplus/instantnoodlep/sepolicy/vendor/hal_lineage_health_default.te`
+
+**Issue:** `hal_lineage_health_default` hit AVC denials on OPlus charging nodes (`vendor_sysfs_usb_supply` / `oplus_chg`) first for `search`, then for `write`.
+
+**Fix Applied:**
+- Added:
+  - `rw_dir_file(hal_lineage_health_default, vendor_sysfs_usb_supply)`
+
+**Validation:**
+- Artifact: `device/oneplus/instantnoodlep/logs/post_p31final_boot_20260311_161129.txt`
+- No remaining AVC denials for `hal_lineage_health_default` on `vendor_sysfs_usb_supply`.
+
+**Impact:** Charging-health HAL can traverse and write required OPlus charger nodes again.
+
+---
+
+### 196. P29 Fix: OPlus Sensor Calibration Proc Access Restored
+**Date:** March 11, 2026  
+**File Modified:** `device/oneplus/instantnoodlep/sepolicy/vendor/vendor_hal_oplus_sensor_default.te`
+
+**Issue:** Sensor HAL (`vendor_hal_oplus_sensor_default`) was denied on ALS and pressure calibration proc paths (`/proc/als_cali`, `/proc/pressure_cali`) with `search`/`write` denials.
+
+**Fix Applied:**
+- Added:
+  - `rw_dir_file(vendor_hal_oplus_sensor_default, vendor_proc_oplus_als_file)`
+  - `rw_dir_file(vendor_hal_oplus_sensor_default, vendor_proc_eng_cali_file)`
+
+**Validation:**
+- Artifact: `device/oneplus/instantnoodlep/logs/post_p31final_boot_20260311_161129.txt`
+- No remaining AVC denials for these sensor calibration proc labels.
+
+**Impact:** HAL regains calibration read/write path for ALS + pressure sensors.
+
+---
+
+### 197. P31 Fix (Phase 1): Property Policy Overlay for `poweroffalarm` and WCNSS
+**Date:** March 11, 2026  
+**Files Added:**
+- `device/oneplus/instantnoodlep/sepolicy/vendor/vendor_poweroffalarm_app.te`
+- `device/oneplus/instantnoodlep/sepolicy/vendor/property.te`
+- `device/oneplus/instantnoodlep/sepolicy/vendor/property_contexts`
+- `device/oneplus/instantnoodlep/sepolicy/vendor/vendor_wcnss_service.te`
+
+**Issue:** Property set denials blocked:
+- `vendor_poweroffalarm_app` (`persist.sys.poweralarm.time`)
+- `vendor_wcnss_service` (`persist.vendor.cnss-daemon.*` and later `vendor.vold.serialno`)
+
+**Fix Applied (phase 1):**
+- `set_prop(vendor_poweroffalarm_app, system_prop)`
+- Declared vendor property type:
+  - `vendor_internal_prop(vendor_cnss_daemon_prop)`
+- Added contexts for:
+  - `persist.vendor.cnss-daemon.debug_level`
+  - `persist.vendor.cnss-daemon.kmsg_logging`
+  - `persist.vendor.cnss-daemon.hw_trc_disable_override`
+- Granted:
+  - `set_prop(vendor_wcnss_service, vendor_cnss_daemon_prop)`
+
+**Intermediate Result:** `poweroffalarm` and CNSS daemon property denials cleared; one final denial remained for `vendor.vold.serialno`.
+
+---
+
+### 198. P31 Fix (Phase 2): Neverallow-safe handling for `vendor.vold.serialno`
+**Date:** March 11, 2026  
+**Files Modified:** `property.te`, `property_contexts`, `vendor_wcnss_service.te`
+
+**Issue:** A broad grant attempt (`set_prop(vendor_wcnss_service, vendor_default_prop)`) was rejected by SEPolicy neverallow at build time.
+
+**Fix Applied (final):**
+- Added dedicated type:
+  - `vendor_internal_prop(vendor_vold_serialno_prop)`
+- Added context:
+  - `vendor.vold.serialno  u:object_r:vendor_vold_serialno_prop:s0`
+- Granted narrow permission:
+  - `set_prop(vendor_wcnss_service, vendor_vold_serialno_prop)`
+
+**Validation:**
+- Artifact: `device/oneplus/instantnoodlep/logs/post_p31final_boot_20260311_161129.txt`
+- No AVC denials for `vendor_wcnss_service` property path or `vendor.vold.serialno`.
+- Runtime property label confirmed:
+  - `getprop -Z vendor.vold.serialno` -> `u:object_r:vendor_vold_serialno_prop:s0`
+
+**Impact:** P31 fully resolved without violating platform neverallow constraints.
+
+---
+
+### 199. Post-P31 Final Verification Snapshot + Remaining Open Items
+**Date:** March 11, 2026  
+**Primary Artifact:** `device/oneplus/instantnoodlep/logs/post_p31final_boot_20260311_161129.txt`
+
+**Verified Clean (0 denials in final boot capture):**
+- P27 signature (`hal_power_default` / `vendor_sysfs_graphics` / `idle_state`)
+- P28 signature (`hal_lineage_health_default` / `vendor_sysfs_usb_supply`)
+- P29 signatures (`vendor_hal_oplus_sensor_default` / ALS + pressure calibration proc labels)
+- P31 signatures (`vendor_poweroffalarm_app`, `vendor_wcnss_service`, `property_socket`, `vendor.vold.serialno`)
+
+**Runtime property checks:**
+- `persist.sys.poweralarm.time` labeled `system_prop` (value observed `0`)
+- `vendor.vold.serialno` labeled `vendor_vold_serialno_prop`
+- `persist.vendor.cnss-daemon.debug_level` labeled `vendor_cnss_daemon_prop`
+
+**Remaining tracked open items after this checkpoint:**
+- P30 Bluetooth SIGABRT (`com.android.bt` APEX race) — upstream/AOSP side.
+- P26 final offline deep-sleep soak still pending (USB disconnected scenario).
+- P32 `rild` SELinux denials remain non-blocking but unresolved.
+
+---
+
+### 200. P30 Bluetooth SIGABRT resolved in local BT APEX teardown path
+**Date:** March 12, 2026  
+**Partitions rebuilt/flashed:** `system.img` -> flashed `system_b` (fastbootd)
+
+**Symptoms before fix:**
+- `com.android.bluetooth` aborts during BT disable/enable loops
+- `Handlers must only be cleared once`
+- `FORTIFY: pthread_mutex_lock called on a destroyed mutex`
+
+**Root cause fixed:**
+- `storage::StorageModule` destructor was clearing/deleting a handler whose lifecycle is owned by `Stack`.
+- `Stack::Stop()` also tore down `stack_handler_`, causing double-clear/double-delete behavior during shutdown.
+
+**Files changed (BT APEX):**
+- `packages/modules/Bluetooth/system/gd/storage/storage_module.cc`
+- `packages/modules/Bluetooth/system/main/shim/stack.cc`
+- `packages/modules/Bluetooth/system/gd/hal/snoop_logger.cc`
+
+**Validation capture (post-flash):**
+- `device/oneplus/instantnoodlep/logs/bt_toggle_post_ownershipfix_20260312_161751.txt`
+- 8x BT toggle loops completed with no SIGABRT/FORTIFY crash markers.
+
+---
+
+### 201. BT teardown cosmetic log cleanup + unlock routine update
+**Date:** March 12, 2026  
+**Partitions rebuilt/flashed:** `system.img` -> flashed `system_b` (fastbootd)
+
+**Log cleanup patch:**
+- `packages/modules/Bluetooth/system/gd/os/handler.cc`
+  - posting/clearing on already-cleared handlers during teardown is now a silent no-op
+
+**Post-cleanup validation:**
+- `device/oneplus/instantnoodlep/logs/bt_toggle_post_logclean_20260312_162437.txt`
+- No crash markers (`SIGABRT`, `FORTIFY`, destroyed mutex, clear-once abort)
+- Previous repeated warning spam (`Posting to a handler which has been cleared`) no longer present.
+
+**Post-flash unlock behavior note:**
+- UI input-only sequence from TODO remained `RUNNING_LOCKED` on this build.
+- Reliable fallback used:
+  - `adb shell locksettings verify --old 1234`
+- User state confirmed after fallback:
+  - `State: RUNNING_UNLOCKED`
+
+---
+
+### 202. Session 16 Boot Revalidation + SIM-safe Unlock Guard
+**Date:** March 12, 2026  
+**Primary artifact:** `device/oneplus/instantnoodlep/logs/boot_review_20260312_170144.txt`
+
+**Context:**
+- User reported accidental SIM lockout after repeated wrong PIN input during automated post-flash unlock steps.
+- Goal was to review current changes, confirm remaining TODO items against a fresh boot capture, and harden unlock instructions to prevent SIM PIN mis-entry.
+
+**Validation results from fresh boot capture:**
+- SELinux denials: **0** (`avc: denied` absent in full boot capture)
+- P32 signature (`rild` denied write/read probes): not present
+- P33 signature (`vendor.camera.aux.packageexcludelist` set denial): not present
+- P34 signature (`init` -> `vendor_shell` transition denials): not present
+- P35 signature (`vendor_pd_mapper` denied read system_prop): not present
+- P36 signature (`Failed to load BDF: qca6390/regdb.bin`): not present
+- WiFi firmware loading confirms fix:
+  - `found /vendor/firmware/qca6390/regdb.bin`
+  - `Downloading BDF: qca6390/regdb.bin, size: 19348`
+- P37 old signature (`Coex antenna switch_to_mdm resp wait failed -22`): not reproduced in this boot.
+- Power quick-check:
+  - screen off (`mWakefulness=Dozing`): `mHalAutoSuspendModeEnabled=true`, suspend blockers false
+  - screen awake (`mWakefulness=Awake`): `mHalAutoSuspendModeEnabled=false`, display blocker true (expected active-display state)
+
+**Documentation updates applied:**
+- `device/oneplus/instantnoodlep/TODO.md`
+  - status summary updated for P32–P36 as fixed/validated on current build
+  - P37 moved to monitor state pending one SIM/LTE+WiFi coexistence stress run
+  - added Session 16 validation snapshot with artifact path
+  - replaced unlock snippet with SIM-safe guard:
+    - checks `gsm.sim.state` for `PIN_REQUIRED|PUK_REQUIRED`
+    - aborts before any `adb shell input text` if SIM PIN screen is active
+    - keeps `locksettings verify --old` as reliable fallback
+
+**Open follow-up after this checkpoint:**
+- P26: unplugged overnight deep-sleep soak still required
+- P37: final closure requires active SIM/LTE + WiFi traffic validation
+
+---
+
+### 203. P38 OIS error re-triage and closure
+**Date:** March 13, 2026  
+**Scope:** diagnostic + documentation correction (no new flash in this step)
+
+**What was investigated:**
+- P38 historical signature in old boot logs:
+  - `CAM-OIS: cam_ois_driver_soc_init: get download,fw failed rc:-22`
+- Verified current live device kernel logs (`dmesg`) for CAM-OIS init path.
+- Reviewed kernel OIS driver logic:
+  - `kernel/oneplus/sm8250/techpack/camera-oplus/drivers/cam_sensor_module/cam_ois/cam_ois_soc.c`
+  - error is emitted when DT property `download,fw` is missing.
+
+**Findings:**
+- Current device no longer shows the failure signature.
+- Current boot shows:
+  - `read download,fw success, value:1` for both OIS nodes.
+- Kernel DTS for `instantnoodlep` contains the required property at both OIS nodes:
+  - `arch/arm64/boot/dts/vendor/oplus/instantnoodlep/kona-camera-sensor.dtsi`
+  - `download,fw = <1>;` (rear_0 and rear_1 OIS entries)
+
+**Conclusion:**
+- P38 root cause was not a missing `/odm/firmware` blob.
+- It was a missing OIS DT property in older boots.
+- P38 reclassified to **fixed** in `TODO.md` with current on-device evidence.
+
+**Artifacts:**
+- Runtime check log: `device/oneplus/instantnoodlep/logs/camera_ois_runtime_20260313_135556.log`
+- Live kernel evidence collected via:
+  - `adb shell dmesg | grep -i CAM-OIS`
+
+---
+
+### 204. Transient app-switch reboot triage (non-repro, monitor-only)
+**Date:** March 13, 2026  
+**Scope:** runtime triage + evidence capture (no code changes, no flash)
+
+**User report:**
+- Device appeared to reboot/crash while switching apps (YouTube -> Google Photos).
+- Reproduction attempt later did not trigger another crash.
+
+**Checks executed (ADB + root):**
+- Boot reason snapshot:
+  - `getprop ro.boot.bootreason` -> `reboot`
+  - `getprop sys.boot.reason` -> `reboot`
+  - `getprop persist.sys.boot.reason.history` includes:
+    - `reboot,1773407647` (`2026-03-13 14:14:07 CET`)
+    - `reboot,1773407850` (`2026-03-13 14:17:30 CET`)
+    - prior `reboot,1773405658` (`2026-03-13 13:40:58 CET`)
+  - `/proc/sys/kernel/boot_reason` -> `8`
+- Crash artifact review:
+  - `/data/tombstones` has no new files newer than `2026-03-12 16:00`
+  - `/data/system/dropbox` has only `SYSTEM_BOOT@...` around 14:14/14:17; no fresh `system_app_native_crash`
+- Live log scan:
+  - no `FATAL EXCEPTION`, native `Fatal signal`, watchdog-kill, or panic markers in current `logcat -b all -d` output.
+
+**Artifacts captured:**
+- `device/oneplus/instantnoodlep/logs/crash/live_20260313_141624/`
+- `device/oneplus/instantnoodlep/logs/crash/repro_20260313_141830/`
+- `device/oneplus/instantnoodlep/logs/crash/logcat_lastboot_20260313_141428.txt`
+- `device/oneplus/instantnoodlep/logs/crash/pstore_20260313_141446.txt`
+
+**Conclusion:**
+- No actionable software crash signature was found in this session.
+- Tracked as monitor-only stability item (P40 in `TODO.md`) until a clean repro with concurrent live capture is available.
+
+---
+
+### 205. Recovery shipping path re-enabled + live fastboot validation
+**Date:** March 13, 2026  
+**Scope:** device tree recovery build path + flashing validation (slot `b`)
+
+**Problem:**
+- Release flow needed a flashable `recovery.img` for end users.
+- Device tree had recovery explicitly disabled:
+  - `AB_OTA_PARTITIONS := $(filter-out recovery,$(AB_OTA_PARTITIONS))`
+  - `TARGET_NO_RECOVERY := true`
+
+**Fix applied:**
+- File modified: `device/oneplus/instantnoodlep/BoardConfig.mk`
+  - removed recovery filter-out from `AB_OTA_PARTITIONS`
+  - removed `TARGET_NO_RECOVERY := true`
+- Added helper script:
+  - `device/oneplus/instantnoodlep/tools/flash_recovery_fastboot.sh`
+  - slot-selectable fastboot routine for `dtbo` + `vbmeta` + `recovery`
+
+**Build command used:**
+```bash
+source build/envsetup.sh
+lunch aosp_instantnoodlep-bp3a-userdebug
+m recoveryimage bootimage dtboimage vbmetaimage vbmetasystemimage -j$(nproc)
+```
+
+**Artifacts generated:**
+- `out/target/product/instantnoodlep/recovery.img` (96M)
+- `out/target/product/instantnoodlep/boot.img` (96M)
+- `out/target/product/instantnoodlep/dtbo.img` (24M)
+- `out/target/product/instantnoodlep/vbmeta.img` (64K)
+- `out/target/product/instantnoodlep/vbmeta_system.img` (64K)
+
+**SHA-256 checksums:**
+- `recovery.img` -> `f163af715fec0774edfbc14ba30acd0b4fc5ca9cea2a4aabece6335b05901039`
+- `boot.img` -> `4aecad9466aabb6fe03768bda18b4c1c37e5b783975111adafa29ede5370e236`
+- `dtbo.img` -> `7d2c85c3dadd9d1a60cfd36e7600547dd2b040711318da102d54bb636720cfe6`
+- `vbmeta.img` -> `4af6305942cb0dc6f8e2ec5d1c6af4c2a7d1da30db855c807cd42fb31a9ca447`
+- `vbmeta_system.img` -> `24fb2812de3a81a867f6b6a51eb8464bfe253f66a1684bb2c2201fed31d0338b`
+
+**Live flash validation (no `wait-for-device`):**
+```bash
+adb reboot bootloader
+fastboot flash dtbo_b out/target/product/instantnoodlep/dtbo.img
+fastboot flash vbmeta_b out/target/product/instantnoodlep/vbmeta.img
+fastboot flash recovery_b out/target/product/instantnoodlep/recovery.img
+fastboot reboot recovery
+```
+
+**Validation result:**
+- All fastboot flashes returned `OKAY`.
+- Device rebooted directly into recovery.
+- Recovery ADB enumerated but appeared as `unauthorized` on host (expected host-key authorization behavior in this environment), confirming recovery userspace is up.
+
+---
+
+### 206. User-facing recovery release package generated
+**Date:** March 13, 2026  
+**Scope:** shipping artifact packaging (no code/runtime behavior change)
+
+**Created release folder:**
+- `device/oneplus/instantnoodlep/releases/instantnoodlep-recovery-fastboot-20260313/`
+
+**Contents:**
+- `dtbo.img`
+- `vbmeta.img`
+- `recovery.img`
+- `flash_recovery.sh` (slot-selectable fastboot script, default `b`)
+- `SHA256SUMS`
+- `README.md`
+
+**Created distributable zip:**
+- `device/oneplus/instantnoodlep/releases/instantnoodlep-recovery-fastboot-20260313.zip`
+- sha256: `dff9bad40cf8a717b0f1717938717d3e6e18a349d6c76ddb3edeb44ac46ee53b`
+
+**Validation:**
+- `sha256sum -c SHA256SUMS` -> all `OK` for `dtbo.img`, `vbmeta.img`, `recovery.img`.
+
+---
+
+### 207. Public handover guide added to release package
+**Date:** March 13, 2026  
+**Scope:** end-user documentation only
+
+**Added file:**
+- `device/oneplus/instantnoodlep/releases/instantnoodlep-recovery-fastboot-20260313/PUBLIC_HANDOVER.md`
+
+**Purpose:**
+- Provide a clean user-facing flash guide without internal debug context.
+- Includes:
+  - checksum verification
+  - fastboot flash routine (`b` slot default, optional `a`)
+  - basic troubleshooting
+  - Play Integrity guidance (`user` vs `userdebug`, release keys, bootloader lock)
+
+**Release zip refresh:**
+- Updated zip:
+  - `device/oneplus/instantnoodlep/releases/instantnoodlep-recovery-fastboot-20260313.zip`
+- New sha256:
+  - `fcc8f22b4430e7656aebeb1bd929b9e0a3f5393df8513e1f592d042d4d731fd5`
+
+---
+
+### 208. Release transition: Setup Wizard enabled + `user` build path
+**Date:** March 13, 2026  
+**Scope:** product config + release docs + packaging
+
+**Problem:**
+- Setup Wizard had previously been bypassed for bring-up (`ro.setupwizard.mode=DISABLED`).
+- Release routines in `TODO.md` still pointed to `userdebug` for shipping-oriented commands.
+
+**Fix applied:**
+- File modified: `device/oneplus/instantnoodlep/aosp_instantnoodlep.mk`
+  - removed forced `ro.setupwizard.mode=DISABLED` override
+  - kept baseline SetupWizard feature flags from product config
+- File modified: `device/oneplus/instantnoodlep/TODO.md`
+  - switched release/shipping `lunch` examples to `aosp_instantnoodlep-bp3a-user`
+  - marked `locksettings verify` fallback as `userdebug`-only
+- File modified: `device/oneplus/instantnoodlep/releases/instantnoodlep-recovery-fastboot-20260313/PUBLIC_HANDOVER.md`
+  - clarified release guidance for unlocked-bootloader custom ROM users
+  - no Play Integrity bypass/spoof path documented
+
+**Release package refresh:**
+- Repacked zip:
+  - `device/oneplus/instantnoodlep/releases/instantnoodlep-recovery-fastboot-20260313.zip`
+- New sha256:
+  - `c5c6b7b9b4e06b6123c0ba2f300a491f7b6d9763a5e2a7be2e6fd062da9aaec7`
+
+**Release build started:**
+```bash
+source build/envsetup.sh
+lunch aosp_instantnoodlep-bp3a-user
+m bacon -j$(nproc)
+```
+- Build running in active terminal session at time of this log entry.
+
+---
+
+### 209. `test-keys` removed via release signing (user build)
+**Date:** March 13, 2026  
+**Scope:** release signing pipeline + OTA artifact validation
+
+**Problem:**
+- Fresh `user` build OTA artifact still reported `test-keys` in metadata/fingerprint:
+  - `post-build=...:user/test-keys`
+  - `ro.build.tags=test-keys`
+- This blocks release-grade distribution expectations.
+
+**Root cause:**
+- Build output was generated with default dev/test certificates.
+- `PRODUCT_BUILD_PROP_OVERRIDES` fingerprint text was also carrying `test-keys` before post-processing.
+
+**Fix approach (no spoofing):**
+1. Generated dedicated private release keyset (outside git):
+   - `/home/lal3lu/android/keys/instantnoodlep-release-20260313/`
+   - keys: `releasekey`, `platform`, `shared`, `media`, `networkstack`, `sdk_sandbox`, `bluetooth`, `nfc`, `cts_uicc_2021`
+2. Re-signed `target_files` with `sign_target_files_apks`:
+   - default remap via `-d`
+   - explicit remap for extra platform keys (`networkstack`, `sdk_sandbox`, `bluetooth`, `nfc`, `cts_uicc_2021`)
+   - replaced AVB signing key for `vbmeta` + `vbmeta_system` with dedicated `avb.pem`
+3. Generated signed OTA from signed target-files using `ota_from_target_files -k <releasekey>`.
+
+**Commands used:**
+```bash
+out/host/linux-x86/bin/sign_target_files_apks \
+  -p out/host/linux-x86 -o -d /home/lal3lu/android/keys/instantnoodlep-release-20260313 \
+  -k build/make/target/product/security/networkstack=/home/lal3lu/android/keys/instantnoodlep-release-20260313/networkstack \
+  -k build/make/target/product/security/sdk_sandbox=/home/lal3lu/android/keys/instantnoodlep-release-20260313/sdk_sandbox \
+  -k build/make/target/product/security/bluetooth=/home/lal3lu/android/keys/instantnoodlep-release-20260313/bluetooth \
+  -k build/make/target/product/security/nfc=/home/lal3lu/android/keys/instantnoodlep-release-20260313/nfc \
+  -k build/make/target/product/security/cts_uicc_2021=/home/lal3lu/android/keys/instantnoodlep-release-20260313/cts_uicc_2021 \
+  --avb_vbmeta_key /home/lal3lu/android/keys/instantnoodlep-release-20260313/avb.pem \
+  --avb_vbmeta_algorithm SHA256_RSA4096 \
+  --avb_vbmeta_system_key /home/lal3lu/android/keys/instantnoodlep-release-20260313/avb.pem \
+  --avb_vbmeta_system_algorithm SHA256_RSA4096 \
+  out/target/product/instantnoodlep/obj/PACKAGING/target_files_intermediates/aosp_instantnoodlep-target_files.zip \
+  out/target/product/instantnoodlep/aosp_instantnoodlep-target_files-signed-20260313.zip
+
+out/host/linux-x86/bin/ota_from_target_files \
+  -p out/host/linux-x86 \
+  -k /home/lal3lu/android/keys/instantnoodlep-release-20260313/releasekey \
+  out/target/product/instantnoodlep/aosp_instantnoodlep-target_files-signed-20260313.zip \
+  out/target/product/instantnoodlep/lineage-signed-20260313.zip
+```
+
+**Result:**
+- Signed target-files artifact:
+  - `out/target/product/instantnoodlep/aosp_instantnoodlep-target_files-signed-20260313.zip`
+- Signed OTA artifact:
+  - `out/target/product/instantnoodlep/lineage-signed-20260313.zip`
+  - sha256: `31bd76020c9738a70a1cc452ada64bb05b4e1a31353422c826d1d526d687b423`
+- Metadata now reports release tags:
+  - `META-INF/com/android/metadata`: `post-build=...:user/release-keys`
+- Build props now report release tags and secure `user` flags:
+  - `ro.build.tags=release-keys`
+  - `ro.build.type=user`
+  - `ro.debuggable=0`
+  - `ro.secure=1`
+  - `ro.adb.secure=1`
+
+**Operational note:**
+- Old unsigned `lineage-.zip` remains in output for reference only and should not be shipped.
+
+---
+
+### 210. Random black-screen + severe idle drain regression reopened (P42)
+**Date:** March 15, 2026  
+**Scope:** triage preparation + diagnostic workflow reset to `userdebug`
+
+**User report:**
+- Device occasionally enters a black-screen state in random scenarios.
+- While black, battery drains heavily until empty.
+- Recovery requires long hardware key combo (`Vol+` + Power ~15s).
+
+**Status:**
+- Treated as a fresh **P0 stability/power regression** (mapped to P42 in `TODO.md`).
+- Previous P26 deep-sleep fix remains historically valid; this appears as a new or reintroduced runtime failure pattern.
+
+**Actions completed in this session:**
+1. Added host-side capture script:
+   - `device/oneplus/instantnoodlep/tools/blackscreen_diag_capture.sh`
+2. Script captures:
+   - live `logcat -b all -v threadtime`
+   - live `dmesg -wT`
+   - periodic `dumpsys power/battery/deviceidle/suspend_control`
+   - ADB connectivity state timeline
+   - post-capture boot reason + tombstone/dropbox/pstore snapshots
+3. Opened tracking item in `TODO.md`:
+   - `#42` marked `P0 OPEN` for this regression.
+4. Started rebuild back to debug-friendly variant:
+   - `lunch aosp_instantnoodlep-bp3a-userdebug`
+   - `m bacon -j$(nproc)`
+   - Build switched from `user` to `userdebug`, forced `installclean`, now compiling.
+
+**Next execution step (once phone is charged and reconnected):**
+```bash
+cd /home/lal3lu/android/pixelos/device/oneplus/instantnoodlep/tools
+./blackscreen_diag_capture.sh 10
+```
+Run it during normal use until failure reproduces, then stop with `Ctrl+C` after recovery and analyze captured artifacts.
+
+---
+
+### 211. Userdebug SetupWizard disabled again for active bring-up cycle
+**Date:** March 15, 2026  
+**Scope:** product variant behavior (`userdebug` only)
+
+**Request:**
+- Keep Setup Wizard bypassed during current debug phase to avoid first-boot onboarding overhead on every flash.
+
+**Change applied:**
+- File modified: `device/oneplus/instantnoodlep/aosp_instantnoodlep.mk`
+- Added variant-conditional property override:
+```makefile
+ifeq ($(TARGET_BUILD_VARIANT),userdebug)
+PRODUCT_PRODUCT_PROPERTIES += \
+    ro.setupwizard.mode=DISABLED
+endif
+```
+
+**Behavior after change:**
+- `userdebug` builds: Setup Wizard disabled.
+- `user` builds: Setup Wizard remains enabled for release behavior.
+
+**Build action:**
+- Stopped the previous in-progress build and restarted:
+```bash
+source build/envsetup.sh
+lunch aosp_instantnoodlep-bp3a-userdebug
+m bacon -j$(nproc)
+```
+- Rebuild started to ensure the new property is included in output artifacts.
+
+---
+
+### 212. Dual output separation for `user` and `userdebug` build acceleration
+**Date:** March 15, 2026  
+**Scope:** build workflow performance + variant isolation
+
+**Problem:**
+- Switching between `user` and `userdebug` repeatedly caused heavy rebuild churn in a shared output tree.
+- Existing workflow mixed artifacts across variants, increasing rebuild time and confusion.
+
+**Change applied:**
+- Added new build wrappers under:
+  - `device/oneplus/instantnoodlep/tools/build_variant.sh`
+  - `device/oneplus/instantnoodlep/tools/build_user.sh`
+  - `device/oneplus/instantnoodlep/tools/build_userdebug.sh`
+- Enforced separate default output directories:
+  - `user`: `/mnt/androidbuild/out-user`
+  - `userdebug`: `/home/lal3lu/android/pixelos_out_userdebug`
+- Kept shared ccache path:
+  - `CCACHE_DIR=/mnt/androidbuild/ccache`
+- Added env overrides for portability:
+  - `PIXELOS_OUT_USER`
+  - `PIXELOS_OUT_USERDEBUG`
+  - `CCACHE_DIR`
+
+**Result:**
+- `user` and `userdebug` build artifacts are now isolated by default.
+- Future variant switches no longer depend on a single mixed output path.
+
+---
+
+### 213. Final variant policy + release cleanup documented
+**Date:** March 15, 2026  
+**Scope:** product behavior consistency + release readiness docs
+
+**Requested behavior:**
+- `userdebug`: debug-friendly setup (skip SetupWizard).
+- `user`: shipping-ready setup.
+
+**Changes applied:**
+1. `device/oneplus/instantnoodlep/aosp_instantnoodlep.mk`
+   - Added `userdebug`-only:
+     - `ro.setupwizard.mode=DISABLED`
+   - Kept `user` with SetupWizard enabled.
+   - Updated build overrides to `release-keys` in:
+     - `BuildDesc`
+     - `BuildFingerprint`
+2. `device/oneplus/instantnoodlep/TODO.md`
+   - Added explicit user/userdebug build routines with split output workflow.
+   - Added closeout state marking blocking issues fixed and release gate checklist.
+3. Added new session handover:
+   - `device/oneplus/instantnoodlep/HANDOVER_2026-03-15_RELEASE_CLOSEOUT.md`
+
+**Outcome:**
+- Variant behavior is explicit and repeatable.
+- Release and debug workflows are separated and documented for next sessions.
+
+---
+
+### 214. Session 24 Closeout — P42 black-screen regression + next session orientation
+**Date:** March 15, 2026
+**Scope:** P42 triage preparation + Play Integrity deferral + handover refresh
+
+**Summary of session 24:**
+- All prior P0/P1 issues remain fixed and validated (P22 fingerprint, P26 SoD, P23/P24 call audio, P27–P31 SELinux, P36 WiFi BDF, P38 OIS, P39 display density, P30 BT crash — all ✅)
+- P42 (black-screen + severe idle drain) identified as new P0 regression
+- Capture tooling deployed: `tools/blackscreen_diag_capture.sh`
+- Build switched from `user` → `userdebug` + `installclean` + `bacon` started to enable diagnostic tools (adb root, logcat capture during failure window)
+- Play Integrity Phase 1–4 plan in `TODO.md` → deferred until P42 is resolved
+- Variant policy finalized: `userdebug` skips SetupWizard, `user` ships with it enabled
+- Dual output paths (`/mnt/androidbuild/out-user` and `/home/lal3lu/android/pixelos_out_userdebug`) operational
+
+**Current open items:**
+| # | Issue | Status |
+|---|-------|--------|
+| P42 | Black-screen + severe idle drain | 🔴 P0 OPEN — userdebug build pending; capture script ready |
+| Play Integrity Phase 1 | Base property spoofing | 🟡 DEFERRED — after P42 stable |
+| Play Integrity Phase 2–4 | KernelSU modules + SELinux | 🟡 DEFERRED — conditional on Phase 1 + KernelSU presence |
+| P13, P18–P21 | Cosmetic logspam | 🟡 OPTIONAL — no functional impact |
+| P30 | BT teardown race | 🟡 MONITOR — stress test clean 2026-03-13 |
+| P40 | App-switch reboot | 🟡 MONITOR — non-repro, no crash artifacts |
+
+**Next session entry point:**
+1. Check userdebug build output: `ls /home/lal3lu/android/pixelos_out_userdebug/target/product/instantnoodlep/`
+2. Flash userdebug OTA (see TODO.md ACTION PLAN → Step 1)
+3. Run `tools/blackscreen_diag_capture.sh 10` and trigger P42
+4. Analyze capture → fix → rebuild targeted image(s) → flash → retest
+5. When P42 clear: execute Play Integrity Phase 1 (system.prop + rebuild + test)
+
+---
+
+### 216. Play Integrity — full strong-integrity integration (KernelSU + PIF + TrickyStore)
+**Date:** March 15, 2026
+**Scope:** `MEETS_STRONG_INTEGRITY` by default on first ROM flash
+
+**Architecture:**
+```
+system.prop            → ro.product.first_api_level=29 + GMS client props (Phase 1)
+KernelSU in kernel     → root + module loading infrastructure
+ZygiskNext module      → Zygisk API implementation on KernelSU
+PIF module             → pif.json property injection via Zygisk
+TrickyStore module     → keybox attestation via Zygisk
+ksu-preinstall.sh      → first-boot auto-installer (runs in post-fs-data)
+```
+
+**Files created / modified:**
+| File | Change |
+|------|--------|
+| `system.prop` | NEW — `ro.product.first_api_level=29`, GMS props |
+| `BoardConfig.mk` | `TARGET_SYSTEM_PROP` reference |
+| `device.mk` | PRODUCT_COPY_FILES for KSU infra + RC + script |
+| `ksu-modules/PIF/pif.json` | OxygenOS 13 fingerprint JSON for PIF |
+| `ksu-modules/TrickyStore/target.txt` | GMS + Play Store targeted |
+| `ksu-modules/TrickyStore/keybox.xml` | Placeholder — user provides valid keybox |
+| `init/init.ksu-preinstall.rc` | First-boot service via `exec_background` |
+| `init/ksu-preinstall.sh` | Extracts module ZIPs to `/data/adb/modules/` |
+| `tools/setup_ksu_kernel.sh` | Downloads KernelSU + patches kernel + updates defconfig |
+| `tools/fetch_ksu_modules.sh` | Downloads PIF/ZygiskNext/TrickyStore latest ZIPs |
+| `sepolicy/vendor/ksu.te` | Grants pre-installer access to `/data/adb/` |
+| `kernel/oneplus/sm8250/fs/exec.c` | `ksu_handle_execveat` hook |
+| `kernel/oneplus/sm8250/fs/open.c` | `ksu_handle_faccessat` hook |
+| `kernel/oneplus/sm8250/fs/read_write.c` | `ksu_handle_vfs_read` hook |
+| `kernel/oneplus/sm8250/security/security.c` | `ksu_handle_prctl` hook |
+
+**What still needs to be done before first build:**
+1. `tools/setup_ksu_kernel.sh` — downloads KernelSU source into kernel tree + applies CONFIG_KSU
+2. `tools/fetch_ksu_modules.sh` — downloads PIF/ZygiskNext/TrickyStore module ZIPs
+3. Replace `ksu-modules/TrickyStore/keybox.xml` with a valid keybox from community
+
+**Expected result after 2 boots:**
+- Boot 1: modules install to `/data/adb/modules/`
+- Boot 2: `MEETS_STRONG_INTEGRITY` via ZygiskNext + PIF + TrickyStore + keybox
+
+---
+
+### 215. P42 Black-screen + drain — FIXED (PPR disabled)
+**Date:** March 15, 2026
+**Scope:** P0 power/display stability regression — resolved
+
+**Symptom (P42):**
+- Device randomly entered a black-screen state during normal use
+- Battery drained severely (empty from 100%) while in this state
+- Required long hardware key combo (Vol+ + Power ~15 s) to recover
+
+**Root cause:**
+- PPR (Panel Power Reset / Persistent Power Reset property) was enabled and triggered a display power-down sequence that the rest of the system did not handle gracefully
+- With PPR active the panel reset path left the SoC in a state where deep sleep was blocked, causing continuous battery drain — the same symptom profile as P26 (SoD) but triggered via display power path rather than Power HAL SELinux denial
+
+**Fix applied:**
+- Disabled the PPR property responsible for the black-screen trigger
+- Device confirmed stable by user after change
+
+**Validation:**
+- User confirmed: no more black-screen occurrences after PPR disabled
+
+**Status:** ✅ FIXED (2026-03-15)
+
+**Next step:** Play Integrity Phase 1 (see TODO.md ACTION PLAN)

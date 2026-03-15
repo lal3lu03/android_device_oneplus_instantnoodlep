@@ -2,6 +2,8 @@
 # used during early calibration and sensor list bring-up.
 r_dir_file(vendor_hal_oplus_sensor_default, vendor_persist_engineer_file)
 r_dir_file(vendor_hal_oplus_sensor_default, vendor_persist_sensors_file)
+rw_dir_file(vendor_hal_oplus_sensor_default, vendor_proc_oplus_als_file)
+rw_dir_file(vendor_hal_oplus_sensor_default, vendor_proc_eng_cali_file)
 
 # Allow OPlus sensor HAL to open and use the oplus_sensor_devinfo character device.
 type oplus_sensor_devinfo_device, dev_type;

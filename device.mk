@@ -37,6 +37,22 @@ PRODUCT_COPY_FILES += \
     $(LOCAL_PATH)/init/sensor_recover.sh:$(TARGET_COPY_OUT_ODM)/bin/sensor_recover.sh \
     $(LOCAL_PATH)/init/zz_vendor.touch-hal.override.rc:$(TARGET_COPY_OUT_ODM)/etc/init/zz_vendor.touch-hal.override.rc \
     $(LOCAL_PATH)/init/zz_audio_prop_migration.rc:$(TARGET_COPY_OUT_VENDOR)/etc/init/zz_audio_prop_migration.rc \
+    $(LOCAL_PATH)/init/init.ksu-preinstall.rc:$(TARGET_COPY_OUT_VENDOR)/etc/init/init.ksu-preinstall.rc \
+    $(LOCAL_PATH)/init/ksu-preinstall.sh:$(TARGET_COPY_OUT_VENDOR)/bin/ksu-preinstall.sh \
+
+# KernelSU — Play Integrity module pre-install (config files always included)
+# Binary .so files are only included after running tools/fetch_ksu_modules.sh
+PRODUCT_COPY_FILES += \
+    $(LOCAL_PATH)/ksu-modules/PIF/pif.json:$(TARGET_COPY_OUT_VENDOR)/etc/ksu-preinstall/PIF/pif.json \
+    $(LOCAL_PATH)/ksu-modules/TrickyStore/target.txt:$(TARGET_COPY_OUT_VENDOR)/etc/ksu-preinstall/tricky_store/target.txt \
+    $(LOCAL_PATH)/ksu-modules/TrickyStore/keybox.xml:$(TARGET_COPY_OUT_VENDOR)/etc/ksu-preinstall/tricky_store/keybox.xml
+
+# Conditionally include module ZIPs if fetch_ksu_modules.sh has been run
+KSU_MODS_DIR := $(LOCAL_PATH)/ksu-modules
+$(foreach mod, PIF ZygiskNext TrickyStore, \
+  $(eval KSU_ZIP := $(KSU_MODS_DIR)/$(mod)/module.zip) \
+  $(if $(wildcard $(KSU_ZIP)), \
+    $(eval PRODUCT_COPY_FILES += $(KSU_ZIP):$(TARGET_COPY_OUT_VENDOR)/etc/ksu-preinstall/$(mod)/module.zip)))
 
 # Display
 PRODUCT_COPY_FILES += \
@@ -45,6 +61,10 @@ PRODUCT_COPY_FILES += \
 # Input
 PRODUCT_COPY_FILES += \
     $(LOCAL_PATH)/input/touchpanel.idc:$(TARGET_COPY_OUT_VENDOR)/usr/idc/touchpanel.idc
+
+# WiFi firmware
+PRODUCT_COPY_FILES += \
+    vendor/oneplus/instantnoodlep/proprietary/vendor/firmware/qca6390/regdb.bin:$(TARGET_COPY_OUT_VENDOR)/firmware/qca6390/regdb.bin
 
 # Overlays
 DEVICE_PACKAGE_OVERLAYS += \

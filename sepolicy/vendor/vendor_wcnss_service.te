@@ -1,0 +1,2 @@
+set_prop(vendor_wcnss_service, vendor_cnss_daemon_prop)
+set_prop(vendor_wcnss_service, vendor_vold_serialno_prop)

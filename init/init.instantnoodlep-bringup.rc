@@ -1,6 +1,6 @@
 on post-fs-data
     start vendor.touch-hal
-    exec_background u:r:vendor_shell:s0 -- /odm/bin/sensor_recover.sh
+    exec_background u:r:vendor_qti_init_shell:s0 -- /odm/bin/sensor_recover.sh
     # Enable QCOM speaker protection (required for TFA9874 amplifier calibration)
     setprop persist.vendor.audio.speaker.prot.enable true
     start fps_hal

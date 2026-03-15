@@ -1,0 +1,3 @@
+# Cosmetic SELinux cleanup: servicemanager attempts a binder call to usbd
+# during USB service discovery on boot. Permit the call to avoid AVC logspam.
+allow servicemanager usbd:binder call;

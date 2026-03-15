@@ -1,0 +1,10 @@
+# Play Integrity — Phase 1 base property spoofing
+#
+# ro.product.first_api_level: must be 29 (device launched with Android 10).
+# PRODUCT_SHIPPING_API_LEVEL is already 29 in device.mk but this makes it
+# explicit and ensures no board-level override wins.
+ro.product.first_api_level=29
+
+# GMS client identity — keeps Google services aligned with the spoofed OEM identity.
+ro.com.google.clientidbase=android-oneplus
+ro.com.google.gmsversion=gms_20_202009

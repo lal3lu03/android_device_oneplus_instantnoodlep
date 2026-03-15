@@ -1,0 +1,31 @@
+<?xml version="1.0"?>
+<!--
+  KEYBOX PLACEHOLDER — REPLACE BEFORE BUILDING FOR STRONG INTEGRITY
+  ===================================================================
+  This file must contain a valid Android hardware attestation keybox
+  (certificate chain signed by Google's root CA) for TrickyStore to
+  achieve MEETS_STRONG_INTEGRITY.
+
+  How to obtain:
+  1. Visit the TrickyStore project community (GitHub releases / XDA thread)
+  2. Download a current valid keybox.xml (community-maintained)
+  3. Replace this entire file with the downloaded keybox.xml
+
+  Without a valid keybox, TrickyStore will still run but attestation
+  falls back to MEETS_DEVICE_INTEGRITY (same as Phase 1 baseline).
+
+  Format reference:
+  <AndroidAttestation>
+    <NumberOfKeyboxes>1</NumberOfKeyboxes>
+    <Keybox DeviceID="...">
+      <Key algorithm="ecdsa">
+        <PrivateKey format="pem">...</PrivateKey>
+        <CertificateChain>
+          <NumberOfCertificates>N</NumberOfCertificates>
+          <Certificate format="pem">...</Certificate>
+          ...
+        </CertificateChain>
+      </Key>
+    </Keybox>
+  </AndroidAttestation>
+-->

@@ -1,0 +1,4 @@
+persist.vendor.cnss-daemon.debug_level              u:object_r:vendor_cnss_daemon_prop:s0
+persist.vendor.cnss-daemon.kmsg_logging             u:object_r:vendor_cnss_daemon_prop:s0
+persist.vendor.cnss-daemon.hw_trc_disable_override  u:object_r:vendor_cnss_daemon_prop:s0
+vendor.vold.serialno                                u:object_r:vendor_vold_serialno_prop:s0

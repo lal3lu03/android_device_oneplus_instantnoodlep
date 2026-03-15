@@ -1,0 +1,15 @@
+{
+  "MANUFACTURER": "OnePlus",
+  "MODEL": "IN2025",
+  "FINGERPRINT": "OnePlus/OnePlus8Pro/OnePlus8Pro:13/RKQ1.211119.001/Q.204faf2-2-7cfdc8:user/release-keys",
+  "BRAND": "OnePlus",
+  "PRODUCT": "OnePlus8Pro",
+  "DEVICE": "OnePlus8Pro",
+  "RELEASE": "13",
+  "ID": "RKQ1.211119.001",
+  "INCREMENTAL": "Q.204faf2-2-7cfdc8",
+  "TYPE": "user",
+  "TAGS": "release-keys",
+  "SECURITY_PATCH": "2023-01-05",
+  "DEVICE_INITIAL_SDK_INT": 29
+}

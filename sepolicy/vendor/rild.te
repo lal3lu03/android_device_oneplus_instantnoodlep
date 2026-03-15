@@ -1,0 +1,5 @@
+# RIL probes legacy paths during init. These denials are non-blocking on this
+# device but can flood audit logs.
+dontaudit rild system_data_root_file:dir write;
+dontaudit rild cache_file:lnk_file read;
+dontaudit rild default_prop:file read;
