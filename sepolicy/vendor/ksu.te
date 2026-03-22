@@ -8,8 +8,11 @@
 
 # vendor_qti_init_shell already has access to vendor_file and shell_exec.
 # Grant additional access to adb_data_file (/data/adb/) for module setup.
-allow vendor_qti_init_shell adb_data_file:dir { create search write add_name remove_name };
-allow vendor_qti_init_shell adb_data_file:file { create open read write getattr setattr unlink };
+# This is debug-only and must not be present in release user builds.
+userdebug_or_eng(`
+  allow vendor_qti_init_shell adb_data_file:dir { create search write add_name remove_name };
+  allow vendor_qti_init_shell adb_data_file:file { create open read write getattr setattr unlink };
 
-# Allow unzip execution from vendor_qti_init_shell (for module ZIP extraction)
-allow vendor_qti_init_shell toolbox_exec:file { read execute open execute_no_trans };
+  # Allow unzip execution from vendor_qti_init_shell (for module ZIP extraction)
+  allow vendor_qti_init_shell toolbox_exec:file { read execute open execute_no_trans };
+')

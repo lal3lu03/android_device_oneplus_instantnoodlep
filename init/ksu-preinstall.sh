@@ -54,8 +54,11 @@ if [ -f "$PREINSTALL_DIR/tricky_store/target.txt" ]; then
     cp "$PREINSTALL_DIR/tricky_store/target.txt" "$TRICKY_CFG_DIR/target.txt"
 fi
 
-# Deploy PIF config (pif.json is read from the module directory itself)
-# Already in /data/adb/modules/PIF/pif.json after ZIP extraction.
+# Deploy PIF custom fingerprint config
+# osm0sis PlayIntegrityFork reads /data/adb/modules/PIF/custom.pif.prop
+if [ -f "$PREINSTALL_DIR/PIF/custom.pif.prop" ]; then
+    cp "$PREINSTALL_DIR/PIF/custom.pif.prop" "$MODULES_DIR/PIF/custom.pif.prop"
+fi
 
 # Mark installation complete
 touch "$FLAG_FILE"

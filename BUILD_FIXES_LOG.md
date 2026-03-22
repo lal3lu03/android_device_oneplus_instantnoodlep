@@ -5333,6 +5333,32 @@ m bacon -j$(nproc)
 
 ---
 
+### 214. Split-output symlink layout aligned to legacy `out` pattern
+**Date:** March 19, 2026  
+**Scope:** build path consistency + symlink integrity
+
+**Request:**
+- Keep new `user`/`userdebug` output setup in the same symlink style as legacy `out -> /mnt/androidbuild/out`.
+
+**Actions:**
+1. Created missing symlink:
+   - `/home/lal3lu/android/pixelos/out_user -> /mnt/androidbuild/out-user`
+2. Verified existing symlinks:
+   - `/home/lal3lu/android/pixelos/out -> /mnt/androidbuild/out`
+   - `/home/lal3lu/android/pixelos/out_userdebug -> /home/lal3lu/android/pixelos_out_userdebug`
+3. Ensured target directories exist for build outputs:
+   - `/mnt/androidbuild/out-user` (created)
+   - `/home/lal3lu/android/pixelos_out_userdebug` (already present)
+4. Updated docs to reflect symlink-first paths:
+   - `TODO.md` split-output defaults
+   - `HANDOVER_2026-03-15_RELEASE_CLOSEOUT.md` split-output defaults and artifact paths
+
+**Validation:**
+- All top-level symlinks (`out`, `out_user`, `out_userdebug`, `Android.bp`, `bootstrap.bash`) resolve to existing targets.
+- No broken link found in current top-level build path structure.
+
+---
+
 ### 214. Session 24 Closeout — P42 black-screen regression + next session orientation
 **Date:** March 15, 2026
 **Scope:** P42 triage preparation + Play Integrity deferral + handover refresh

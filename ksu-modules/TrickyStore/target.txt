@@ -1,8 +1,2 @@
-# TrickyStore target.txt
-# Apps that need keybox attestation for MEETS_STRONG_INTEGRITY.
-# Add banking / payment / streaming apps that check hardware-backed attestation.
-# Google Play Integrity core:
-com.google.android.gms
 com.android.vending
-# Common apps that check strong integrity — extend as needed:
-# com.google.android.gms.auth.api.phone
+com.google.android.gms
