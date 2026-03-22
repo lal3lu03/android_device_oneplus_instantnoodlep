@@ -13,3 +13,6 @@
 /ksu-modules/PIF/custom.pif.prop
 /ksu-modules/TrickyStore/module.zip
 /ksu-modules/ZygiskNext/
+
+# Local helper scripts
+/tools/
