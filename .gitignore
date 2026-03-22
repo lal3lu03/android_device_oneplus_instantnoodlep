@@ -1,0 +1,15 @@
+# Local build outputs
+/out/
+/releases/
+/vendorimg/
+
+# Local logs/debug captures
+/build.log
+/logs/
+/debug_logs/
+
+# Downloaded module artifacts (keep module source files trackable)
+/ksu-modules/PIF/module.zip
+/ksu-modules/PIF/custom.pif.prop
+/ksu-modules/TrickyStore/module.zip
+/ksu-modules/ZygiskNext/
