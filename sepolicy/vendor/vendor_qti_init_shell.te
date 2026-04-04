@@ -4,3 +4,8 @@ allow vendor_qti_init_shell mnt_vendor_file:dir search;
 create_dir_file(vendor_qti_init_shell, vendor_persist_sensors_file)
 rw_dir_file(vendor_qti_init_shell, vendor_persist_sensors_file)
 allow vendor_qti_init_shell vendor_persist_sensors_file:file setattr;
+
+# sensor_recover.sh touches existing registry directories and may traverse
+# files not owned by system:system while validating old calibration snapshots.
+allow vendor_qti_init_shell vendor_persist_sensors_file:dir write;
+allow vendor_qti_init_shell self:capability dac_read_search;

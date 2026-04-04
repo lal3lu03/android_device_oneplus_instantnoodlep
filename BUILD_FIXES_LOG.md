@@ -5458,3 +5458,28 @@ ksu-preinstall.sh      → first-boot auto-installer (runs in post-fs-data)
 **Status:** ✅ FIXED (2026-03-15)
 
 **Next step:** Play Integrity Phase 1 (see TODO.md ACTION PLAN)
+
+---
+
+### 217. Qualcomm RAM-management stability fix — dedicated record
+**Date:** March 31, 2026
+**Scope:** runtime stability under normal multitasking / suspend transitions
+
+**Reason for dedicated entry:**
+- Track the previously reported "Qualcomm RAM-management" failure pattern as explicitly fixed in release history.
+
+**Observed behavior (pre-fix):**
+- Intermittent UI hang (1-2s) followed by black screen.
+- Device stayed powered but drained battery aggressively until hard-reboot.
+
+**Root cause classification:**
+- Not an LMKD/minfree tuning issue.
+- Trigger was the PPR (Panel Power Reset) path causing panel power-down state transitions that blocked proper suspend/deep-sleep behavior and produced RAM-management-like instability symptoms.
+
+**Applied fix:**
+- Disabled the PPR property in device configuration (same corrective action documented in P42).
+
+**Validation:**
+- Post-fix user validation confirmed black-screen + heavy-drain behavior no longer reproduced in normal usage.
+
+**Status:** ✅ FIXED
