@@ -1,7 +1,7 @@
 # TODO — `instantnoodlep` A16 Bringup
 **Device:** OnePlus 8 Pro (`instantnoodlep`, sm8250)
 **Branch:** `a16-bringup-fixes`
-**Last updated:** 2026-04-04
+**Last updated:** 2026-04-22
 
 > Completed bringup items are in [DONE.md](DONE.md).
 
@@ -13,9 +13,27 @@
 
 ---
 
+## OOS CAMERA INTEGRATION (Session 34+) — P0 (CRITICAL)
+
+| Task | Details | Status |
+|------|---------|--------|
+| E1 | Pushed `libsymphony-cpu.so`, `libsymphonypower.so`, `libaps_frame_registration.so`, `libstdc++.so` to `/vendor/lib(64)/` | DONE |
+| E2 | Fixed SELinux `same_process_hal_file` contexts for all OOS camera blobs | DONE |
+| E3 | Fixed mount namespace issue via soft reboot (Zygote restart) | DONE |
+| E4 | Added `libsymphony*.so` to `/vendor/etc/public.libraries.txt` | DONE |
+| E5 | Add all identified missing libs to `proprietary-files.txt` | DONE |
+| E6 | Map copied libs in `camera-vendor.mk` | DONE |
+| E7 | Permanently add `sepolicy` for OOS camera blobs | DONE |
+| E8 | Add `fwk_config.json` and `calibrationOutput_*.bin` to `device.mk` | DONE |
+| E9 | Inject `oplus.permission.OPLUS_COMPONENT_SAFE` (required for lens switching) | DONE (source; requires full-system flash for permanent runtime) |
+| E10 | Filter A16-only standard camera metadata tags out of the legacy OOS HIDL client path | DONE (source + `libcameraservice` build) |
+| E11 | Flash metadata-filter fix and re-test main / `0.6x` / tele / video on `6c170bdd` slot `_a` | NOT STARTED |
+
+---
+
 ## OPEN TASKS — Play Integrity Integration (Session 24+)
 
-All bringup blockers are cleared. Next work is Play Integrity.
+Play Integrity stays parked until the current OOS camera runtime validation track is closed.
 
 ### Phase 1 — Base Property Spoofing (NO ROOT EXPOSURE) — P0
 

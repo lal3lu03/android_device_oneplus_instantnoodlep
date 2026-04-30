@@ -5541,3 +5541,260 @@ The correct value for the OnePlus 8 Pro AMOLED at normal usage is **420 DPI**.
 - System layout correct at all standard resolutions ✅
 
 **Status:** ✅ FIXED
+
+---
+
+### 220. OOS Camera integration (latest extracted blobs) with Photos handoff
+**Date:** April 19, 2026
+**Files Modified:**
+- `device/oneplus/instantnoodlep/device.mk`
+- `device/oneplus/instantnoodlep/BoardConfig.mk`
+- `vendor/oneplus/camera/camera-vendor.mk`
+**Scope:** Replace AOSP/Lineage camera app path with OnePlus Camera packages, keep Google Photos as gallery target.
+
+**Change summary:**
+- Added camera blob inherit in device product makefile:
+  - `$(call inherit-product-if-exists, vendor/oneplus/camera/camera-vendor.mk)`
+- Imported `vendor/oneplus/camera` into the source tree as a real directory (not external symlink), so Soong can index `Android.bp` modules.
+- Kept only OnePlus Camera app stack (`OnePlusCamera`, `OnePlusCameraService`, `OnePlusCameraPicProcService`) and did not include OnePlus Gallery.
+- Cleaned `camera-vendor.mk` for Android 16 build compliance:
+  - removed copy-file duplicates against existing vendor install paths
+  - removed `PRODUCT_COPY_FILES` VINTF manifest copies (`/etc/vintf/manifest/*`) blocked by current build rules
+  - moved those manifests to proper board variables:
+    - `DEVICE_MANIFEST_FILE += vendor/oneplus/camera/proprietary/vendor/etc/vintf/manifest/manifest_oplus_cameramdm.xml`
+    - `ODM_MANIFEST_FILES += vendor/oneplus/camera/proprietary/odm/etc/vintf/manifest/manifest_oplus_engcamera.xml`
+  - removed missing-source copy entry (`com.qti.stats.pdlib.so` in `vendor/lib/camera/components`)
+
+**Validation:**
+- `m nothing -j12` passes with camera integration enabled.
+- Targeted module build passes:
+  - `m OnePlusCamera OnePlusCameraService OnePlusCameraPicProcService -j12`
+- Output confirms installation:
+  - `product/priv-app/OnePlusCamera/*.apk`
+  - `product/priv-app/OnePlusCameraService/*.apk`
+  - `product/priv-app/OnePlusCameraPicProcService/*.apk`
+- No `OnePlusGallery` package found in product installed files.
+- System gallery overlay remains Google Photos (`config_systemGallery=com.google.android.apps.photos`).
+
+**Status:** ✅ Integrated and build-validated
+
+---
+
+### 221. OOS Camera bring-up boot/runtime fixes after on-device flash
+**Date:** April 20, 2026
+**Files Modified:**
+- `device/oneplus/instantnoodlep/BoardConfig.mk`
+- `vendor/oneplus/camera/proprietary/odm/etc/init/vendor.oplus.hardware.engcamera@1.0-service.rc`
+- `vendor/oneplus/camera/proprietary/product/etc/permissions/com.oneplus.camera.xml`
+**Scope:** Fix post-flash boot crash and init validation issues from imported OOS camera package.
+
+**Issues and fixes:**
+- **Build blocker (ELF in `PRODUCT_COPY_FILES`)**
+  - Error: Android 16 packaging rejected camera ELF blobs copied via `PRODUCT_COPY_FILES`.
+  - Fix: enabled `BUILD_BROKEN_ELF_PREBUILT_PRODUCT_COPY_FILES := true` in device `BoardConfig.mk` for proprietary blob packaging.
+
+- **Init verifier blocker (`engcamera` rc interface)**
+  - Error: `host_init_verifier` rejected `interface vendor.oplus.hardware.engcamera@1.0::IEngCamera default` (interface not declared in source HIDL set).
+  - Fix: removed the invalid `interface ...` line from `vendor.oplus.hardware.engcamera@1.0-service.rc`, keeping service definition intact.
+
+- **Runtime boot crash (`system_server`)**
+  - Error in crash buffer:
+    - `IllegalStateException: Signature|privileged permissions not in privileged permission allowlist: {com.oneplus.camera ... android.permission.TURN_SCREEN_ON}`
+  - Fix: added `<permission name="android.permission.TURN_SCREEN_ON" />` to `com.oneplus.camera` privapp allowlist XML.
+
+**Validation after reflash (`product/system/vendor/odm` then `product` hotfix):**
+- Device boots successfully (`sys.boot_completed=1`).
+- No post-boot `crash` buffer fatal entries.
+- Installed packages present:
+  - `com.oneplus.camera`
+  - `com.oneplus.camera.service`
+  - `com.oneplus.camera.pictureprocessing`
+- `com.oneplus.gallery` absent.
+- `SYSTEM_GALLERY` role holder = `com.google.android.apps.photos`.
+- Camera launch smoke test (`monkey -p com.oneplus.camera 1`) completes without crash log entries.
+
+**Status:** ✅ FIXED and verified on device
+
+---
+
+### 222. Ultrawide camera crash fix (`cameraId=6`) by restoring missing vendor C++ runtime
+**Date:** April 20, 2026
+**Files Modified:**
+- `vendor/oneplus/camera/camera-vendor.mk`
+- `vendor/oneplus/camera/proprietary/vendor/lib64/libc++_shared.so` (added from extracted OOS blobs)
+**Scope:** Fix short camera crash window and ultrawide stream setup failure.
+
+**Issue observed in runtime logs:**
+- `load_api: failed to open Altek CFR lib /vendor/lib64/libalCFRLV_dsp.so`
+- `dlopen failed: library "libc++_shared.so" not found`
+- Follow-up failures on ultrawide path:
+  - `Camera 6: configureStreamsLocked ... Function not implemented (-38)`
+  - `CreateMultiCameraResource() Failed to alloc memory for Multi Camera Resources (Streams)`
+  - camera preview entered error path and activity finished.
+
+**Fix:**
+- Added missing vendor runtime dependency to camera blob packaging:
+  - `vendor/lib64/libc++_shared.so -> $(TARGET_COPY_OUT_VENDOR)/lib64/libc++_shared.so`
+- Rebuilt and flashed `vendor.img` on active test slot.
+
+**Validation (post-flash log capture):**
+- `/vendor/lib64/libc++_shared.so` is present on-device.
+- `libalCFRLV_dsp.so` now loads successfully (`load_api: Succesfully loaded sym ...`).
+- No occurrences in capture of:
+  - `Camera 6: configureStreamsLocked`
+  - `Function not implemented (-38)`
+  - `CreateMultiCameraResource() Failed`
+  - `load_api: failed to open Altek CFR lib`
+
+**Status:** ✅ Fixed at runtime-log level (manual UX confirmation requested)
+
+---
+
+### 223. OnePlus camera pic-proc dependency chain fix (all lens backends)
+**Date:** April 20, 2026
+**Files Modified:**
+- `vendor/oneplus/camera/camera-vendor.mk`
+- `vendor/oneplus/camera/proprietary/vendor/lib/libAlgoProcess.so` (added)
+- `vendor/oneplus/camera/proprietary/vendor/lib/libapsjpeg.so` (added)
+- `vendor/oneplus/camera/proprietary/vendor/lib/libapsexif.so` (added)
+- `vendor/oneplus/camera/proprietary/vendor/lib/libaps_frame_registration.so` (added)
+- `vendor/oneplus/camera/proprietary/vendor/lib/libapsdarksight.so` (added)
+- `vendor/oneplus/camera/proprietary/vendor/lib/libPolarrRender.so` (added)
+- `vendor/oneplus/camera/proprietary/vendor/lib/libmpbase.so` (added)
+- `vendor/oneplus/camera/proprietary/vendor/lib64/libAlgoProcess.so` (added)
+- `vendor/oneplus/camera/proprietary/vendor/lib64/libapsjpeg.so` (added)
+- `vendor/oneplus/camera/proprietary/vendor/lib64/libapsexif.so` (added)
+- `vendor/oneplus/camera/proprietary/vendor/lib64/libaps_frame_registration.so` (added)
+- `vendor/oneplus/camera/proprietary/vendor/lib64/libapsdarksight.so` (added)
+
+**Issue observed in runtime logs:**
+- Missing OOS camera pic-proc libs in `/vendor` caused camera backend instability and provider self-kill path.
+- Previous captures showed missing symbols/libs around pic-proc (`libAlgoProcess`, `liboppojpeg`, `liboppoexif`) before camera provider timeout/self-kill sequences.
+
+**Fix:**
+- Added required pic-proc/APS libs into vendor image packaging for both `lib` and `lib64`.
+- Added compatibility filenames expected by `libAlgoProcessDefault.so`:
+  - `liboppojpeg.so` mapped from `libapsjpeg.so`
+  - `liboppoexif.so` mapped from `libapsexif.so`
+- Avoided duplicate 64-bit `libPolarrRender.so`/`libmpbase.so` packaging (already provided by `vendor/oneplus/sm8250-common/Android.bp`).
+
+**Validation (post-flash):**
+- Rebuilt and flashed `vendor_a` successfully.
+- On-device verification confirms presence of:
+  - `/vendor/lib64/libAlgoProcess.so`, `/vendor/lib64/libapsjpeg.so`, `/vendor/lib64/libapsexif.so`, `/vendor/lib64/libaps_frame_registration.so`, `/vendor/lib64/libapsdarksight.so`, `/vendor/lib64/liboppojpeg.so`, `/vendor/lib64/liboppoexif.so`
+  - and corresponding `/vendor/lib/*` versions.
+- Camera service enumerates all devices (`0..7`) in `dumpsys media.camera`.
+- Post-flash camera launch smoke logs contain no `libAlgoProcess/liboppojpeg/liboppoexif` load failures and no provider self-kill signature.
+
+**Status:** ✅ Dependency-chain fix applied and runtime smoke clean (manual per-lens UX validation recommended)
+
+---
+
+### 224. OOS provider executable SELinux transition fix (`.oplus` binary)
+**Date:** April 23, 2026  
+**Files Modified:**
+- `device/oneplus/instantnoodlep/sepolicy/vendor/file_contexts`
+
+**Issue observed in runtime logs:**
+- `init: Could not ctl.start for 'vendor.camera-provider-2-4' ... incorrect label or no domain transition`
+- camera app timed out waiting for camera list while provider failed to launch.
+
+**Fix:**
+- Added explicit file context for the overridden provider binary:
+  - `/vendor/bin/hw/android.hardware.camera.provider@2.4-service_64.oplus -> u:object_r:hal_camera_default_exec:s0`
+
+**Validation:**
+- On-device label check passes (`ls -Z` shows `hal_camera_default_exec`).
+- service starts under `hal_camera_default` domain.
+
+**Status:** ✅ Fixed
+
+---
+
+### 225. OOS provider runtime dependency + startup timing stabilization
+**Date:** April 23, 2026  
+**Files Modified:**
+- `vendor/oneplus/camera/camera-vendor.mk`
+- `vendor/oneplus/camera/proprietary-files.txt`
+- `vendor/oneplus/camera/proprietary/vendor/lib64/android.hardware.camera.device@1.0.so` (added)
+- `vendor/oneplus/camera/proprietary/vendor/lib64/android.hardware.camera.provider@2.4.so` (added)
+- `device/oneplus/instantnoodlep/init/zz_oos_camera_provider_override.rc`
+
+**Issue observed in runtime logs:**
+- provider link failure on boot:
+  - `library "android.hardware.camera.device@1.0.so" not found`
+- late provider availability caused OnePlus Camera timeout (`onTimeoutWaitingForCameraList()`).
+
+**Fix:**
+- Packaged required 64-bit provider deps into vendor search path:
+  - copied to `/vendor/lib64/hw/`
+- Started `vendor.camera-provider-2-4` on boot in override rc so provider is ready before app launch.
+
+**Validation:**
+- `/vendor/lib64/hw/android.hardware.camera.device@1.0.so` and `...provider@2.4.so` present after flash.
+- provider process is up immediately after boot.
+- camera intent stress loop (ultrawide/tele/video cycling) runs without timeout or provider restart in capture window.
+
+**Status:** ✅ Fixed (remaining long-session random crash not reproduced in latest loop)
+
+---
+
+### 226. OnePlus Camera postproc hwservice access for OOS modes
+**Date:** April 24, 2026
+**Files Modified:**
+- `device/oneplus/instantnoodlep/sepolicy/vendor/platform_app.te`
+
+**Issue observed in runtime logs:**
+- OnePlus Camera runs as `platform_app` and directly queries the vendor camera postproc HIDL service.
+- Runtime denial from camera capture:
+  - `avc: denied { find } for interface=vendor.qti.hardware.camera.postproc::IPostProcService ... scontext=u:r:platform_app:s0 ... tcontext=u:object_r:vendor_hal_camera_postproc_hwservice:s0 tclass=hwservice_manager`
+- App-side symptom paired with the denial:
+  - `Failed to query component interface for required system resources: 6`
+- This can break proprietary OOS camera modes even when the blobs are present.
+
+**Fix staged in source:**
+- Tagged `platform_app` as a camera HAL client:
+  - `typeattribute platform_app hal_camera_client;`
+- This follows Qualcomm policy shape for `vendor_hal_camera_postproc_hwservice`, whose neverallow permits `find` only from camera HAL clients.
+- Avoided a direct `allow platform_app ... find` rule because that conflicts with the Qualcomm neverallow.
+
+**Validation status:**
+- Source-side policy fix staged.
+- Pending normal `vendorimage` rebuild, flash to active debug slot `_a`, and camera lens/mode validation once ADB/build output access is available.
+
+**Status:** ⏳ Staged, pending build/flash validation
+
+---
+
+### 227. Legacy HIDL camera metadata compatibility filter for OOS client path
+**Date:** April 24, 2026
+**Files Modified:**
+- `frameworks/av/services/camera/libcameraservice/hidl/HidlCameraService.cpp`
+- `frameworks/av/services/camera/libcameraservice/hidl/HidlCameraDeviceUser.cpp`
+- `device/oneplus/instantnoodlep/device.mk`
+
+**Fresh runtime findings (ADB validation on `6c170bdd`, slot `_a`):**
+- `adb root` works, device is on `_a`, SELinux is enforcing.
+- `dumpsys media.camera` now reports `8` camera devices and `524` vendor tags.
+- This makes the older `0 Camera IDs` diagnosis stale on the currently flashed build.
+- Fresh OnePlus Camera launch still reproduces:
+  - `Failed to query component interface for required system resources: 6`
+  - repeated `camera_metadata: add_camera_metadata_entry: Unknown tag 10037`
+  - `NativeCameraMetadata: deserialize() - Failed to add entry 0x00010037`
+- `0x00010037` maps to the standard framework tag `ANDROID_CONTROL_AUTOFRAMING`, not a vendor tag.
+
+**Root cause hypothesis:**
+- The legacy HIDL camera client bridge is forwarding newer A16 standard metadata tags to the old OOS client path.
+- The provider is already publishing vendor tags correctly, so the failure is more consistent with metadata compatibility skew than with missing OOS blob packaging.
+
+**Fix:**
+- Added a legacy HIDL wrapper override property:
+  - `ro.camera.hidl_legacy_vndk_version=33`
+- Updated the HIDL camera service/device-user wrappers to honor that property when filtering metadata keys for legacy clients.
+- This keeps API 34+ dynamic tags such as `ANDROID_CONTROL_AUTOFRAMING` and `ANDROID_CONTROL_SETTINGS_OVERRIDE` out of the old HIDL/OOS client path while leaving the normal modern framework path unchanged.
+
+**Validation:**
+- `m libcameraservice -j12` on `aosp_instantnoodlep-bp3a-userdebug` completes successfully.
+- Flash/runtime validation still pending.
+
+**Status:** ⏳ Build-validated, pending flash + camera UX validation
